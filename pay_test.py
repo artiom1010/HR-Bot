@@ -5,22 +5,20 @@ from _database import engine, Order
 
 from datetime import datetime, timedelta
 
+from _conf import (
+    PUBLIC_BASE,
+    API_BASE_URL,
+    PORTAL_BASE_URL,
+    MERCHANT_CODE,
+    API_USER,
+    API_PASS,
+    FORM_SECRET_KEY,
+    CURRENCY,
+    NOTIFY_LINK_OK,
+    NOTIFY_LINK_NG
+)
 
 # --- Константы ----------------------------------------------------
-PUBLIC_BASE = "***REMOVED***"
-API_BASE_URL    = "https://test.paynet.md:4446"
-PORTAL_BASE_URL = "https://test.paynet.md"
-
-MERCHANT_CODE   = "***REMOVED***"
-API_USER        = "***REMOVED***"
-API_PASS        = "***REMOVED***"
-FORM_SECRET_KEY = "***REMOVED***"
-
-CURRENCY        = 498
-AMOUNT_CENTS    = 20000
-NOTIFY_LINK_OK  = "https://t.me/hr_md_bot"
-NOTIFY_LINK_NG  = "https://google.com"
-
 
 # --- Сервисные функции -------------------------------------------
 def new_invoice() -> str:
