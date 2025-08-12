@@ -96,7 +96,8 @@ import tempfile, shutil, subprocess, os, logging, glob
 log = logging.getLogger("pdfgen.lo")
 
 TEMPLATE_PATH = Path("files/resume_tmpl.docx")
-OUT_DIR       = Path("files")
+# OUT_DIR       = Path("files")
+OUT_DIR       = Path("resumes")
 
 def _sanitize_filename(name: str) -> str:
     name = re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", name).strip()

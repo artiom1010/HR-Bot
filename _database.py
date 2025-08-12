@@ -9,7 +9,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.pool import StaticPool
 
-# engine = create_engine("sqlite:////Users/artemsary/Desktop/newnew/resume_bot.db", echo=False, future=True)
 engine = create_engine("sqlite:///./resume_bot.db", echo=False, future=True)
 
 Base   = declarative_base()
@@ -33,8 +32,8 @@ class Answer(Base):
 
     id           = Column(Integer, primary_key=True)
     user_id      = Column(Integer, ForeignKey("users.id"), nullable=False)
-    question_key = Column(String(32),  nullable=False)    # e.g. 'skills'
-    answer       = Column(Text)                           # 'none' если пропущено
+    question_key = Column(String(32),  nullable=False)
+    answer       = Column(Text)
     answered_at  = Column(DateTime, default=dt.datetime.utcnow)
 
     user = relationship("User", back_populates="answers")

@@ -119,6 +119,6 @@ def register_payment(order_id: int):
         "Lang":           "ru"
     }
     query = urllib.parse.urlencode(params)
-    return f"***REMOVED***paynet/getform?{query}"
+    return f"{PUBLIC_BASE}/paynet/getform?{query}"
 
 # ***REMOVED***paynet/getform?payment_id=123&signature=abc&expirydate=3423424
