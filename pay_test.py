@@ -4,6 +4,7 @@ import urllib
 from _database import engine, Order
 
 from datetime import datetime, timedelta
+from _utils import logger
 
 from _conf import (
     PUBLIC_BASE,
@@ -93,7 +94,13 @@ def register_payment(order_id: int):
                 "Content-Type": "application/json; charset=UTF-8"
             }
         )
+    content = resp.text
+    logger.info("Paynet SEND status=%s body=%s", resp.status_code, content)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Paynet 400: {content}")
+
     print("Status code:", r.status_code)
+    print("Response headers:", r.headers)
     print("Full response text:", r.text)
 
     r.raise_for_status()
