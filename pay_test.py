@@ -68,8 +68,10 @@ def register_payment(order_id: int):
             },
         "Payer": "null",
         "Currency": CURRENCY,
-        "ExternalDate": external_dt.isoformat(timespec="seconds"),
-        "ExpiryDate": expiry_dt.isoformat(timespec="seconds"),
+        # "ExternalDate": external_dt.isoformat(timespec="seconds"),
+        # "ExpiryDate": expiry_dt.isoformat(timespec="seconds"),
+        "ExternalDate": "2025-08-12T12:00:00",
+        "ExpiryDate": "2025-08-12T23:00:00",
         "Services": [{
             "Name": "Cart of products",
             "Description": "Cart of products",
