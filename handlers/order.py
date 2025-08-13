@@ -26,6 +26,7 @@ router = Router()
 
 async def create_order_and_run_ai(message: Message, user_db_id: int) -> None:
     invoice = new_invoice()
+    print("===> invoice:", invoice)
     # 1. создаём заказ
     def _create():
         with Session(engine) as s:

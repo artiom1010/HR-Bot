@@ -23,9 +23,9 @@ from _conf import (
 
 # --- Сервисные функции -------------------------------------------
 def new_invoice() -> str:
-    ts = int(time.time() * 1000) % 10**9
-    rnd = random.randint(100, 999)
-    return f"{ts:09}{rnd}"
+    # ts = int(time.time() * 1000) % 10**9
+    rnd = random.randint(1000000, 9999999)
+    return f"{rnd}"
 
 def get_token() -> str:
     r = httpx.post(
