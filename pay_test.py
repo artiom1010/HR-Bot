@@ -98,8 +98,10 @@ def register_payment(order_id: int):
         )
 
     print("Status code:", r.status_code)
+    print("Response headers:", r.headers)
     print("Full response text:", r.text)
 
+    r.raise_for_status()
     resp = r.json()
 
     payment_id = str(resp["PaymentId"])
