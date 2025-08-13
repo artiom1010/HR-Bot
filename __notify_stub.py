@@ -8,30 +8,73 @@ from handlers.bot_app import bot
 
 app = FastAPI()
 
+# @app.post("/paynet/notify")
+# async def paynet_notify(req: Request):
+#     body = await req.json()
+#     external_id = str(body["Payment"]["ExternalId"])
+#     event_date = body["EventDate"]  # строка, например "2025-08-07T11:52:32.953"
+
+#     # Парсим в datetime
+#     paid_dt = datetime.fromisoformat(event_date)
+
+#     with Session(engine) as session:
+#         order = session.query(Order).filter(Order.invoice == external_id).first()
+#         if order:
+#             order.paynet_status = PaynetStatus.paid
+#             order.paid_at = paid_dt
+#             session.commit()
+
+#             # Отправляем сообщение юзеру асинхронно
+#             chat_id = order.user.telegram_id
+#             text = "💰 Оплата получена! Нажми кнопку ниже, чтобы скачать резюме."
+#             kb = get_download_keyboard(order.id)
+#             import asyncio
+#             asyncio.create_task(bot.send_message(chat_id, text, reply_markup=kb))
+#     print("PAYNET NOTIFY:", body)
+#     return {"ok": True}
+import traceback
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
 @app.post("/paynet/notify")
 async def paynet_notify(req: Request):
-    body = await req.json()
-    external_id = str(body["Payment"]["ExternalId"])
-    event_date = body["EventDate"]  # строка, например "2025-08-07T11:52:32.953"
+    try:
+        body = await req.json()
+        print("===> PAYNET BODY:", body)
 
-    # Парсим в datetime
-    paid_dt = datetime.fromisoformat(event_date)
+        external_id = str(body["Payment"]["ExternalId"])
+        event_date = body["EventDate"]
+        paid_dt = datetime.fromisoformat(event_date)
+        print(f"===> external_id: {external_id}, paid_dt: {paid_dt}")
 
-    with Session(engine) as session:
-        order = session.query(Order).filter(Order.invoice == external_id).first()
-        if order:
-            order.paynet_status = PaynetStatus.paid
-            order.paid_at = paid_dt
-            session.commit()
+        with Session(engine) as session:
+            order = session.query(Order).filter(Order.invoice == external_id).first()
+            print("===> ORDER FOUND:", order)
 
-            # Отправляем сообщение юзеру асинхронно
-            chat_id = order.user.telegram_id
-            text = "💰 Оплата получена! Нажми кнопку ниже, чтобы скачать резюме."
-            kb = get_download_keyboard(order.id)
-            import asyncio
-            asyncio.create_task(bot.send_message(chat_id, text, reply_markup=kb))
-    print("PAYNET NOTIFY:", body)
-    return {"ok": True}
+            if order:
+                order.paynet_status = PaynetStatus.paid
+                order.paid_at = paid_dt
+                session.commit()
+                print("===> STATUS UPDATED & COMMITTED")
+
+                chat_id = order.user.telegram_id
+                print("===> chat_id:", chat_id)
+                text = "💰 Оплата получена! Нажми кнопку ниже, чтобы скачать резюме."
+                kb = get_download_keyboard(order.id)
+
+                import asyncio
+                asyncio.create_task(bot.send_message(chat_id, text, reply_markup=kb))
+                print("===> MESSAGE SENT TASK CREATED")
+            else:
+                print("===> ORDER NOT FOUND for external_id:", external_id)
+
+        return {"ok": True}
+
+    except Exception as e:
+        print("===> ERROR in paynet_notify:", e)
+        print(traceback.format_exc())
+        return {"ok": False, "error": str(e)}
 
 
 
