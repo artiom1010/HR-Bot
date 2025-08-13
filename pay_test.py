@@ -41,7 +41,7 @@ def register_payment(order_id: int):
     
     now = datetime.now()
     external_dt = now
-    expiry_dt = now + timedelta(hours=1)
+    expiry_dt = now + timedelta(hours=5)
 
     with Session(engine) as s:
         order = s.get(Order, order_id)
@@ -68,10 +68,10 @@ def register_payment(order_id: int):
             },
         "Payer": "null",
         "Currency": CURRENCY,
-        # "ExternalDate": external_dt.isoformat(timespec="seconds"),
-        # "ExpiryDate": expiry_dt.isoformat(timespec="seconds"),
-        "ExternalDate": "2025-08-13T11:00:00",
-        "ExpiryDate": "2025-08-13T23:00:00",
+        "ExternalDate": external_dt.isoformat(timespec="seconds"),
+        "ExpiryDate": expiry_dt.isoformat(timespec="seconds"),
+        # "ExternalDate": "2025-08-13T11:00:00",
+        # "ExpiryDate": "2025-08-13T23:00:00",
         "Services": [{
             "Name": "Cart of products",
             "Description": "Cart of products",
