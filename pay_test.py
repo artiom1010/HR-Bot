@@ -9,21 +9,16 @@ from _utils import logger
 from _conf import (
     PUBLIC_BASE,
     API_BASE_URL,
-    PORTAL_BASE_URL,
     MERCHANT_CODE,
     API_USER,
     API_PASS,
-    FORM_SECRET_KEY,
     CURRENCY,
     NOTIFY_LINK_OK,
     NOTIFY_LINK_NG
 )
 
-# --- Константы ----------------------------------------------------
-
 # --- Сервисные функции -------------------------------------------
 def new_invoice() -> str:
-    # ts = int(time.time() * 1000) % 10**9
     rnd = random.randint(1000000, 9999999)
     return f"{rnd}"
 
@@ -70,8 +65,6 @@ def register_payment(order_id: int):
         "Currency": CURRENCY,
         "ExternalDate": external_dt.isoformat(timespec="seconds"),
         "ExpiryDate": expiry_dt.isoformat(timespec="seconds"),
-        # "ExternalDate": "2025-08-13T11:00:00",
-        # "ExpiryDate": "2025-08-13T23:00:00",
         "Services": [{
             "Name": "Cart of products",
             "Description": "Cart of products",
@@ -125,5 +118,3 @@ def register_payment(order_id: int):
     }
     query = urllib.parse.urlencode(params)
     return f"{PUBLIC_BASE}/paynet/getform?{query}"
-
-# ***REMOVED***paynet/getform?payment_id=123&signature=abc&expirydate=3423424
