@@ -1,5 +1,5 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 def get_payment_keyboard(pay_url: str) -> InlineKeyboardMarkup:
     """
@@ -28,3 +28,23 @@ def get_dev_payment_keyboard(order_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="💳 Оплатить (dev)", callback_data=f"pay_now:{order_id}")]
         ]
     )
+
+
+CHOICES = {
+    "main_language": [("ru", "🇷🇺 Русский"), ("en", "🇬🇧 English"), ("ro", "🇷🇴 Română")],
+    "resume_language": [("ru", "RU — на русском"), ("en", "ENG — на английском"), ("ro", "RO — на румынском")],
+}
+
+
+def encode_cb(key: str, value: str) -> str:
+    return f"ans:{key}:{value}"
+
+def for_question(key: str):
+    opts = CHOICES.get(key)
+    if not opts:
+        return None
+    kb = InlineKeyboardBuilder()
+    for value, label in opts:
+        kb.button(text=label, callback_data=encode_cb(key, value))
+    kb.adjust(2)
+    return kb.as_markup()
