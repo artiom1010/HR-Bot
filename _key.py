@@ -62,5 +62,5 @@ def for_question(key: str):
     kb = InlineKeyboardBuilder()
     for value, label in opts:
         kb.button(text=label, callback_data=encode_cb(key, value))
-    kb.adjust(2)
+    kb.adjust(1)
     return kb.as_markup()
