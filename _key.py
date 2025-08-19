@@ -31,8 +31,24 @@ def get_dev_payment_keyboard(order_id: int) -> InlineKeyboardMarkup:
 
 
 CHOICES = {
-    "main_language": [("ru", "🇷🇺 Русский"), ("en", "🇬🇧 English"), ("ro", "🇷🇴 Română")],
-    "resume_language": [("ru", "RU — на русском"), ("en", "ENG — на английском"), ("ro", "RO — на румынском")],
+    "main_language": [
+        ("main_ru", "🇷🇺 Русский"), 
+        ("main_en", "🇬🇧 English"), 
+        ("main_ro", "🇷🇴 Română")
+    ],
+    "resume_language": [
+        ("ru", "RU — на русском"), 
+        ("en", "ENG — на английском"), 
+        ("ro", "RO — на румынском")
+    ],
+    "resume_goal": [
+        ("find_job_profession", "Найти новую работу в своей профессии"),
+        ("resume_manager_position", "Оформить резюме на руководящую позицию"),
+        ("find_first_job", "Найти первую работу"),
+        ("career_change", "Перейти в новую сферу (смена профессии)"),
+        ("resume_freelance", "Сделать резюме для фриланс/проектной работы"),
+        ("update_resume", "Обновить резюме")
+    ]
 }
 
 
