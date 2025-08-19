@@ -2,15 +2,17 @@ import asyncio
 
 from aiogram import Router, F
 from aiogram.filters import Command,CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 
 from sqlalchemy.orm import Session
 from _database import engine, User
 from handlers.db_helpers import get_or_create_user, get_first_unanswered, save_answer, clear_user_answers, clear_user_drafts
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
+from _key import for_question, CHOICES
 
 QUESTION_FLOW = [
+    ("main_language", "🌐 На каком языке тебе будет удобнее общаться со мной?"),
     ("resume_language", "📄 На каком языке ты хочешь получить итоговое резюме?"),
     ("resume_goal",     "💼 C какой целью ты создаёшь резюме?"),
     ("target_position", "🧭 На какую должность ты хочешь податься?"),
@@ -40,13 +42,55 @@ QUESTION_FLOW = [
 
 router = Router()
 
+
+async def send_question(chat_id: int, qkey: str):
+    prompt = dict(QUESTION_FLOW)[qkey]
+    markup = for_question(qkey)  # вернёт None, если вариантов нет
+    await bot.send_message(chat_id, prompt, reply_markup=markup)
+
+
+
+@router.callback_query(F.data.startswith("ans:"))
+async def handle_choice(callback: CallbackQuery):
+    try:
+        _, key, value = callback.data.split(":", 2)
+    except ValueError:
+        await callback.answer("Некорректные данные", show_alert=True)
+        return
+
+    tg_id = callback.from_user.id
+
+    def _work():
+        with Session(engine) as s:
+            user = s.query(User).filter(User.telegram_id == tg_id).first()
+            if not user:
+                return None, None, "no_user", None
+            label = dict(CHOICES.get(key, [])).get(value, value)
+            save_answer(s, user.id, key, label)
+            next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+            return user.id, next_key, None, label
+    user_db_id, next_key, error, label = await asyncio.to_thread(_work)
+    await callback.answer()
+
+    if error == "no_user":
+        await callback.message.answer("Напишите /start сначала, пожалуйста.")
+        return
+    await callback.message.answer(f"Установлен язык резюме: {label}")
+
+    if next_key:
+        await send_question(callback.message.chat.id, next_key)
+    else:
+        await callback.message.answer("Спасибо! Всё заполнено.")
+        await create_order_and_run_ai(callback.message, user_db_id)
+
+
+# ----> КОМАНДА /START ---->
 @router.message(CommandStart())
 async def start_handler(message: Message):
     tg_id = message.from_user.id
     username = message.from_user.username or ""
     full_name = message.from_user.full_name or ""
 
-    # синхронно через to_thread, чтобы не блокировать
     def _work():
         with Session(engine) as s:
             user = get_or_create_user(s, tg_id, username, full_name)
@@ -65,15 +109,13 @@ async def start_handler(message: Message):
 ⏱ Всего 10–15 минут — и ты получишь готовое резюме в PDF и Word, адаптированное под вакансию.
 """)
     if next_key:
-        prompt = dict(QUESTION_FLOW)[next_key]
-        await message.answer(prompt)
+        await send_question(message.chat.id, next_key)
     else:
         await message.answer("🎉 Все вопросы уже собраны.")
         # если всё заполнено — сразу идём в создание заказа
         await create_order_and_run_ai(message, user_db_id)
 
 
-# @router.message(F.text)
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_answer(message: Message):
     tg_id = message.from_user.id
@@ -104,25 +146,16 @@ async def handle_answer(message: Message):
         return
 
     if next_key:
-        prompt = dict(QUESTION_FLOW)[next_key]
-        await message.answer(prompt)
+        await send_question(message.chat.id, next_key)
     else:
         await message.answer("🎉 Спасибо! Всё заполнено.")
         await create_order_and_run_ai(message, user_db_id)
 
 
 
-# async def send_first_question(chat_id: int, user_db_id: int):
-#     """Очищает всё и отправляет первый вопрос анкеты."""
-#     # question_flow определён в этом модуле
-#     first_key = QUESTION_FLOW[0][0]
-#     prompt = dict(QUESTION_FLOW)[first_key]
-#     await bot.send_message(chat_id, prompt)
-
-
 async def send_first_question(chat_id: int, user_db_id: int):
     first_key = QUESTION_FLOW[0][0]
-    await bot.send_message(chat_id, dict(QUESTION_FLOW)[first_key])
+    await send_question(chat_id, first_key)
 
 @router.message(Command("new_interview"))
 async def new_interview_handler(message: Message):
