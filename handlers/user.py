@@ -9,7 +9,36 @@ from _database import engine, User
 from handlers.db_helpers import get_or_create_user, get_first_unanswered, save_answer, clear_user_answers, clear_user_drafts
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
-from _key import for_question, CHOICES
+from _key import for_question, CHOICES, text_or_skip_keyboard
+
+INTRO_BEFORE = {
+    "summary": ("""
+📋 Отлично!
+Сейчас я буду последовательно задавать тебе вопросы и предлагать варианты ответов.
+
+Наша цель — достать из тебя достаточно информации, чтобы сделать сильное продающее резюме.
+Мы соберём его по структуре, которая работает лучше всего:
+    1. Обо мне — короткое, цепляющее описание тебя как специалиста.
+    2. Опыт работы — ключевые места, должности, задачи и результаты.
+    3. Достижения — конкретные факты и цифры, которые подтверждают твой профессионализм.
+    4. Образование и курсы — всё, что усиливает твой профиль.
+    5. Навыки и инструменты — твои ключевые компетенции, языки, программы.
+
+💡 Такая структура помогает работодателю быстро увидеть твою ценность и понять, почему стоит пригласить именно тебя.
+
+Готов(а)? Тогда начинаем! 🚀"
+    """),
+
+}
+async def send_next_with_intro(chat_id: int, next_key: str, user_id: int | None = None):
+    intro = INTRO_BEFORE.get(next_key)
+    if intro:
+        await bot.send_message(chat_id, intro)
+    try:
+        await send_question(chat_id, next_key, user_id)
+    except TypeError:
+        await send_question(chat_id, next_key)
+
 
 QUESTION_FLOW = [
     ("main_language", "🌐 На каком языке тебе будет удобнее общаться со мной?"),
@@ -18,10 +47,9 @@ QUESTION_FLOW = [
     
     ("resume_goal", """
 💼 C какой целью ты создаёшь резюме?
-     
 
 Это поможет мне выбрать правильный стиль, структуру и акценты, чтобы твоё резюме сработало именно под твою задачу.
-     
+
 💬 Например, резюме для смены профессии будет построено так, чтобы выделить твои универсальные навыки и скрыть пробелы в опыте. А резюме для руководящей должности — подчеркнёт лидерские качества, стратегическое мышление и результаты в цифрах.
      """),
     
@@ -44,7 +72,12 @@ QUESTION_FLOW = [
 ✨ Давай сформируем блок “Обо мне”
 
 💡 Когда мы ответим на эти вопросы, я соберу их в сильное, цепляющее описание, например:
-Руководитель проектов с 5-летним опытом в IT. Запускаю цифровые продукты под ключ, выстраиваю эффективные команды и процессы. Ориентирован на результат и рост бизнеса.
+"Руководитель проектов с 5-летним опытом в IT. Запускаю цифровые продукты под ключ, выстраиваю эффективные команды и процессы. Ориентирован на результат и рост бизнеса."
+     
+Я задам несколько коротких вопросов, а ты можешь:
+    - Выбрать готовый вариант кнопкой
+    - Или написать свой текст
+
      
      """),
     
@@ -70,7 +103,7 @@ router = Router()
 
 async def send_question(chat_id: int, qkey: str):
     prompt = dict(QUESTION_FLOW)[qkey]
-    markup = for_question(qkey)  # вернёт None, если вариантов нет
+    markup = text_or_skip_keyboard(qkey) if qkey == "job_description" else for_question(qkey)
     await bot.send_message(chat_id, prompt, reply_markup=markup)
 
 
@@ -171,7 +204,7 @@ async def handle_answer(message: Message):
         return
 
     if next_key:
-        await send_question(message.chat.id, next_key)
+        await send_next_with_intro(message.chat.id, next_key, user_db_id)
     else:
         await message.answer("🎉 Спасибо! Всё заполнено.")
         await create_order_and_run_ai(message, user_db_id)
@@ -200,7 +233,37 @@ async def new_interview_handler(message: Message):
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
 
-    # для самопроверки
     await message.answer(f"🆕 Начинаем новую анкету! (очищено ответов: {deleted})")
     await send_first_question(message.chat.id, user_db_id)
 
+
+
+@router.callback_query(F.data.startswith("flow:"))
+async def handle_flow(callback: CallbackQuery):
+    _, action, key = callback.data.split(":", 2)
+    tg_id = callback.from_user.id
+
+    if action == "ask":
+        await callback.answer()
+        await callback.message.answer("Ожидаю текст вакансии ...")
+        return
+
+    if action == "skip":
+        def _work():
+            with Session(engine) as s:
+                user = s.query(User).filter_by(telegram_id=tg_id).first()
+                if not user: return None, None
+                save_answer(s, user.id, key, "")
+                next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+                return user.id, next_key
+        user_id, next_key = await asyncio.to_thread(_work)
+        await callback.answer()
+        if not user_id:
+            await callback.message.answer("Сначала /start.")
+            return
+        await callback.message.answer("Пропущено.")
+        if next_key:
+            await send_next_with_intro(callback.message.chat.id, next_key, user_id)
+        else:
+            await callback.message.answer("Спасибо! Всё заполнено.")
+            await create_order_and_run_ai(callback.message, user_id)
