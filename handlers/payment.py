@@ -8,8 +8,7 @@ from _database import engine, Order, PaynetStatus
 from handlers.db_helpers import mark_order_paid
 from handlers.bot_app import bot
 
-
-# from _pdf_generator import generate_resume
+from resume_generator import build_resume
 from _pdf_generator_lo import generate_resume
 
 router = Router()
@@ -28,46 +27,54 @@ async def send_resume(chat_id: int, order_id: int) -> None:
                                    "💳 Оплата ещё не подтверждена.\n"
                                    "Проверьте позже, пожалуйста.")
             return
+    paths = build_resume(order_id, make_pdf=True, make_docx=True)
 
-    pdf_path = generate_resume(order_id, to_pdf=True)
-    if not pdf_path:
+    if not paths:
         await bot.send_message(chat_id, "Не удалось подготовить файл резюме. Попробуйте позже.")
-    
-    ext = Path(pdf_path).suffix.lower()
-    if ext == ".pdf":
-#         await bot.send_document(
-#             chat_id,
-#             caption="""
-# 💼 Ваше индивидуальное резюме готово!
-# 📂 Формат: PDF — готово к отправке HR прямо сейчас.
-# \n✨ Используйте этот документ как свой ключ к новым карьерным возможностям.""",
-#             document=FSInputFile(pdf_path)
-#         )
-        await bot.send_message(
-            chat_id,
-            "💼 Ваше индивидуальное резюме готово!\n"
-            "📂 Формат: PDF — готово к отправке HR прямо сейчас.\n\n"
-            "✨ Используйте этот документ как свой ключ к новым карьерным возможностям."
-        )
-    else:
-        await bot.send_message(
-            chat_id,
-            "💼 Ваше индивидуальное резюме готово!\n"
-            "📂 Формат: Word — готово к отправке HR прямо сейчас.\n\n"
-            "✨ Используйте этот документ как свой ключ к новым карьерным возможностям."
-        )
-    await bot.send_document(
+        return
+
+    pdf_path  = paths.get("pdf")
+    docx_path = paths.get("docx")
+
+    await bot.send_message(
         chat_id,
-        FSInputFile(pdf_path),
-        caption=None
+        "💼 Ваше резюме готово! Отправляю PDF и Word."
     )
+    if pdf_path and Path(pdf_path).is_file():
+        await bot.send_document(chat_id, FSInputFile(pdf_path), caption="PDF-версия")
+    if docx_path and Path(docx_path).is_file():
+        await bot.send_document(chat_id, FSInputFile(docx_path), caption="Word-версия (.docx)")
+    # pdf_path = generate_resume(order_id, to_pdf=True)
+    # if not pdf_path:
+    #     await bot.send_message(chat_id, "Не удалось подготовить файл резюме. Попробуйте позже.")
+    
+    # ext = Path(pdf_path).suffix.lower()
+    # if ext == ".pdf":
+    #     await bot.send_message(
+    #         chat_id,
+    #         "💼 Ваше индивидуальное резюме готово!\n"
+    #         "📂 Формат: PDF — готово к отправке HR прямо сейчас.\n\n"
+    #         "✨ Используйте этот документ как свой ключ к новым карьерным возможностям."
+    #     )
+    # else:
+    #     await bot.send_message(
+    #         chat_id,
+    #         "💼 Ваше индивидуальное резюме готово!\n"
+    #         "📂 Формат: Word — готово к отправке HR прямо сейчас.\n\n"
+    #         "✨ Используйте этот документ как свой ключ к новым карьерным возможностям."
+    #     )
+    # await bot.send_document(
+    #     chat_id,
+    #     FSInputFile(pdf_path),
+    #     caption=None
+    # )
         
 
-@router.callback_query(lambda c: c.data and c.data.startswith("download:"))
-async def download_callback(callback: CallbackQuery):
-    order_id = int(callback.data.split(":", 1)[1])
-    await send_resume(callback.from_user.id, order_id)
-    await callback.answer()
+# @router.callback_query(lambda c: c.data and c.data.startswith("download:"))
+# async def download_callback(callback: CallbackQuery):
+#     order_id = int(callback.data.split(":", 1)[1])
+#     await send_resume(callback.from_user.id, order_id)
+#     await callback.answer()
 
 @router.callback_query(lambda c: c.data == "show_example")
 async def show_example_callback(callback: CallbackQuery):
