@@ -271,7 +271,7 @@ async def new_interview_handler(message: Message):
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
 
-    await message.answer(f"🆕 Начинаем новую анкету! (очищено ответов: {deleted})")
+    await message.answer(START_MESSAGE, reply_markup=start_keyboard())
     await send_first_question(message.chat.id, user_db_id)
 
 

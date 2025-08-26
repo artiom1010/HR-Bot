@@ -22,10 +22,17 @@ def get_payment_keyboard(pay_url: str) -> InlineKeyboardMarkup:
     )
 
 
+# def get_download_keyboard(order_id: int) -> InlineKeyboardMarkup:
+#     return InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [InlineKeyboardButton(text="📥 Скачать резюме", callback_data=f"download:{order_id}")]
+#         ]
+#     )
 def get_download_keyboard(order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📥 Скачать резюме", callback_data=f"download:{order_id}")]
+            [InlineKeyboardButton(text="📥 Скачать резюме в формате PDF ", callback_data=f"download_pdf:{order_id}")],
+            [InlineKeyboardButton(text="📥 Скачать резюме в формате DOCX", callback_data=f"download_docx:{order_id}")]
         ]
     )
 
