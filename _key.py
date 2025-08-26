@@ -1,6 +1,14 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+
+def start_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Да, поехали!", callback_data="starts")]
+        ]
+    )
+
 def get_payment_keyboard(pay_url: str) -> InlineKeyboardMarkup:
     """
     • 1-я кнопка – сразу открывает форму PayNet

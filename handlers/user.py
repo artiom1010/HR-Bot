@@ -6,10 +6,19 @@ from aiogram.types import Message, CallbackQuery
 
 from sqlalchemy.orm import Session
 from _database import engine, User
-from handlers.db_helpers import get_or_create_user, get_first_unanswered, save_answer, clear_user_answers, clear_user_drafts
+from handlers.db_helpers import (
+    get_or_create_user, 
+    get_first_unanswered, 
+    save_answer, 
+    clear_user_answers, 
+    clear_user_drafts)
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
-from _key import for_question, CHOICES, text_or_skip_keyboard
+from _key import (
+    for_question, 
+    CHOICES, 
+    text_or_skip_keyboard, 
+    start_keyboard)
 
 INTRO_BEFORE = {
     "summary": ("""
@@ -28,17 +37,19 @@ INTRO_BEFORE = {
 
 Готов(а)? Тогда начинаем! 🚀"
     """),
-
 }
-async def send_next_with_intro(chat_id: int, next_key: str, user_id: int | None = None):
-    intro = INTRO_BEFORE.get(next_key)
-    if intro:
-        await bot.send_message(chat_id, intro)
-    try:
-        await send_question(chat_id, next_key, user_id)
-    except TypeError:
-        await send_question(chat_id, next_key)
 
+START_MESSAGE = """
+👋 Привет!
+
+Я — твой персональный помощник по созданию продающего одностраничного резюме.
+Что это значит?
+Это резюме, которое за 1 страницу убедительно показывает твои сильные стороны, опыт и достижения так, чтобы работодатель захотел пригласить тебя на интервью.
+
+💡 Я соберу твою информацию, задам правильные вопросы и помогу сформулировать ответы так, чтобы они выглядели профессионально и привлекательно.
+
+⏱ Всего 10–15 минут — и ты получишь готовое резюме в PDF и Word, адаптированное под вакансию.
+"""
 
 QUESTION_FLOW = [
     ("main_language", "🌐 На каком языке тебе будет удобнее общаться со мной?"),
@@ -101,10 +112,24 @@ QUESTION_FLOW = [
 router = Router()
 
 
+async def send_next_with_intro(chat_id: int, next_key: str, user_id: int | None = None):
+    intro = INTRO_BEFORE.get(next_key)
+    if intro:
+        await bot.send_message(chat_id, intro)
+    try:
+        await send_question(chat_id, next_key, user_id)
+    except TypeError:
+        await send_question(chat_id, next_key)
+
+async def send_first_question(chat_id: int, user_db_id: int):
+    first_key = QUESTION_FLOW[0][0]
+    await send_question(chat_id, first_key)
+
 async def send_question(chat_id: int, qkey: str):
     prompt = dict(QUESTION_FLOW)[qkey]
     markup = text_or_skip_keyboard(qkey) if qkey == "job_description" else for_question(qkey)
     await bot.send_message(chat_id, prompt, reply_markup=markup)
+
 
 
 
@@ -149,29 +174,47 @@ async def start_handler(message: Message):
     username = message.from_user.username or ""
     full_name = message.from_user.full_name or ""
 
+    # создаём/находим пользователя, но НЕ шлём вопрос
+    await asyncio.to_thread(lambda: (
+        Session(engine),
+    ))
     def _work():
         with Session(engine) as s:
-            user = get_or_create_user(s, tg_id, username, full_name)
-            user_db_id = user.id
-            # получаем первый вопрос
-            next_key = get_first_unanswered(s, user_db_id, QUESTION_FLOW)
-            return user_db_id, next_key
-    user_db_id, next_key = await asyncio.to_thread(_work)
+            get_or_create_user(s, tg_id, username, full_name)
+    await asyncio.to_thread(_work)
 
-    await message.answer("""
-👋 Привет!
- Я — твой персональный помощник по созданию продающего одностраничного резюме.
-Что это значит?
- Это резюме, которое за 1 страницу убедительно показывает твои сильные стороны, опыт и достижения так, чтобы работодатель захотел пригласить тебя на интервью.
-💡 Я соберу твою информацию, задам правильные вопросы и помогу сформулировать ответы так, чтобы они выглядели профессионально и привлекательно.
-⏱ Всего 10–15 минут — и ты получишь готовое резюме в PDF и Word, адаптированное под вакансию.
-""")
+    await message.answer(
+        START_MESSAGE,
+        reply_markup=start_keyboard()
+        )
+
+@router.callback_query(F.data == "starts")
+async def handle_start(callback: CallbackQuery):
+    await callback.answer()
+    # скрыть клавиатуру под приветствием (чтобы не жали повторно)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    tg_id = callback.from_user.id
+    def _work():
+        with Session(engine) as s:
+            user = s.query(User).filter(User.telegram_id == tg_id).first()
+            if not user:
+                user = get_or_create_user(s, tg_id, callback.from_user.username or "", callback.from_user.full_name or "")
+            next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+            return user.id, next_key
+
+    user_id, next_key = await asyncio.to_thread(_work)
+
     if next_key:
-        await send_question(message.chat.id, next_key)
+        await send_question(callback.message.chat.id, next_key)
     else:
-        await message.answer("🎉 Все вопросы уже собраны.")
-        # если всё заполнено — сразу идём в создание заказа
-        await create_order_and_run_ai(message, user_db_id)
+        await callback.message.answer("🎉 Все вопросы уже собраны.\n\nИдёт генерация…")
+        await create_order_and_run_ai(callback.message, user_id)
+
+
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -209,11 +252,6 @@ async def handle_answer(message: Message):
         await message.answer("🎉 Спасибо! Всё заполнено.")
         await create_order_and_run_ai(message, user_db_id)
 
-
-
-async def send_first_question(chat_id: int, user_db_id: int):
-    first_key = QUESTION_FLOW[0][0]
-    await send_question(chat_id, first_key)
 
 @router.message(Command("new_interview"))
 async def new_interview_handler(message: Message):
