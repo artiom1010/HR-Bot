@@ -1,0 +1,18 @@
+/* templates/styles.css */
+@page { size: A4; margin: 18mm; }
+body { font-family: "Arial", Arial, sans-serif; font-size: 11pt; line-height: 1.4; color: #222; }
+
+h1 { font-size: 20pt; margin: 0; }
+h2 { font-size: 14pt; margin: 14pt 0 8pt; border-bottom: 1px solid #999; padding-bottom: 4pt; }
+
+.header { margin-bottom: 12pt; }
+.name { margin: 0 0 4pt 0; }
+.contacts { margin: 2pt 0 0; color: #555; }
+
+section { margin-top: 10pt; }
+.exp { margin: 10pt 0 12pt; }
+.company { margin-top: 2pt; }
+.bullets { margin: 6pt 0 0 16pt; }
+
+
+hr { border: none; border-top: 1px solid #999; margin: 6pt 0 8pt; }

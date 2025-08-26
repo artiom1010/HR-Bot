@@ -249,7 +249,7 @@ async def handle_answer(message: Message):
     if next_key:
         await send_next_with_intro(message.chat.id, next_key, user_db_id)
     else:
-        await message.answer("🎉 Спасибо! Всё заполнено.")
+        await message.answer("🎉 Спасибо! Всё заполнено.\n\n Ваше резюме генерируется...")
         await create_order_and_run_ai(message, user_db_id)
 
 
