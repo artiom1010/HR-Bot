@@ -1,0 +1,86 @@
+<!-- templates/resume.html -->
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="page">
+
+  <!-- ФИО и контакты по центру -->
+  <header class="header">
+    <h1 class="name" style="text-align:center">{{ full_name }}</h1>
+    <p class="contacts" style="text-align:center">
+      e-mail: {{ contact_email }}
+      {% if contact_phone %} | phone: {{ contact_phone }}{% endif %}
+      {% if contact_links %}
+        {% if contact_links is string %}
+          | {{ contact_links }}
+        {% else %}
+          | {{ contact_links|join(' | ') }}
+        {% endif %}
+      {% endif %}
+    </p>
+  </header>
+
+  {% if career_summary %}
+  <section>
+    <h2>О СЕБЕ</h2>
+    <p>{{ career_summary }}</p>
+  </section>
+  {% endif %}
+
+  {% if experiences %}
+  <section>
+    <h2>ОПЫТ РАБОТЫ</h2>
+    {% for exp in experiences %}
+      <article class="exp">
+        <!-- Таблица вместо flex — лучше переносится в DOCX -->
+        <table class="exp-head" style="width:100%">
+          <tr>
+            <td class="title"><strong>{{ exp.job_title_experience }}</strong></td>
+            <td class="period" style="text-align:right">{{ exp.employment_period }}</td>
+          </tr>
+        </table>
+        <div class="company">{{ exp.company_name }}</div>
+
+        {% if exp.job_responsibilities %}
+          <ul class="bullets">
+            {% for r in exp.job_responsibilities %}
+              <li>{{ r }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if education_details %}
+  <section>
+    <h2>ОБРАЗОВАНИЕ</h2>
+    <p>{{ education_details }}</p>
+  </section>
+  {% endif %}
+
+  {% if languages %}
+  <section>
+    <h2>ЯЗЫКИ</h2>
+    <p>{{ languages }}</p>
+  </section>
+  {% endif %}
+
+  {% if hard_skills or soft_skills %}
+  <section>
+    <h2>НАВЫКИ</h2>
+    {% if hard_skills %}
+      <p><strong>HARD SKILLS:</strong><br>{{ hard_skills }}</p>
+    {% endif %}
+    {% if soft_skills %}
+      <p><strong>SOFT SKILLS:</strong><br>{{ soft_skills }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+</body>
+</html>
