@@ -1,3 +1,5 @@
+from typing import List, Tuple, Set
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -8,6 +10,7 @@ def start_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🚀 Да, поехали!", callback_data="starts")]
         ]
     )
+
 
 def get_payment_keyboard(pay_url: str) -> InlineKeyboardMarkup:
     """
@@ -22,12 +25,6 @@ def get_payment_keyboard(pay_url: str) -> InlineKeyboardMarkup:
     )
 
 
-# def get_download_keyboard(order_id: int) -> InlineKeyboardMarkup:
-#     return InlineKeyboardMarkup(
-#         inline_keyboard=[
-#             [InlineKeyboardButton(text="📥 Скачать резюме", callback_data=f"download:{order_id}")]
-#         ]
-#     )
 def get_download_keyboard(order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -45,45 +42,26 @@ def get_dev_payment_keyboard(order_id: int) -> InlineKeyboardMarkup:
     )
 
 
-CHOICES = {
-    "main_language": [
-        ("main_ru", "🇷🇺 Русский"), 
-        ("main_en", "🇬🇧 English"), 
-        ("main_ro", "🇷🇴 Română")
-    ],
-    "resume_language": [
-        ("ru", "RU — на русском"), 
-        ("en", "ENG — на английском"), 
-        ("ro", "RO — на румынском")
-    ],
-    "resume_goal": [
-        ("find_job_profession", "Найти новую работу в своей профессии"),
-        ("resume_manager_position", "Оформить резюме на руководящую позицию"),
-        ("find_first_job", "Найти первую работу"),
-        ("career_change", "Перейти в новую сферу (смена профессии)"),
-        ("resume_freelance", "Сделать резюме для фриланс/проектной работы"),
-        ("update_resume", "Обновить резюме")
-    ]
-}
-
-
-def encode_cb(key: str, value: str) -> str:
-    return f"ans:{key}:{value}"
-
-def for_question(key: str):
-    opts = CHOICES.get(key)
-    if not opts:
-        return None
-    kb = InlineKeyboardBuilder()
-    for value, label in opts:
-        kb.button(text=label, callback_data=encode_cb(key, value))
-    kb.adjust(1)
-    return kb.as_markup()
-
 
 def text_or_skip_keyboard(key: str):
     kb = InlineKeyboardBuilder()
-    kb.button(text="📎 Отправить вакансию", callback_data=f"flow:ask:{key}")
+    kb.button(text="📤 Отправить вакансию", callback_data=f"flow:ask:{key}")
     kb.button(text="⏭ Пропустить",       callback_data=f"flow:skip:{key}")
     kb.adjust(2)
+    return kb.as_markup()
+
+
+def ms_callback(action: str, qkey: str, value: str | None = None) -> str:
+    return f"ms:{action}:{qkey}" + (f":{value}" if value else "")
+
+def build_multiselect_kb(qkey: str, pairs: List[Tuple[str, str]], selected: Set[str]):
+    kb = InlineKeyboardBuilder()
+    for value, label in pairs:
+        checked = "✅" if value in selected else "☐"
+        kb.button(text=f"{checked} {label}", callback_data=ms_callback("toggle", qkey, value))
+    kb.adjust(1)
+    kb.button(text="👤 Свой вариант", callback_data=ms_callback("personal", qkey))
+    kb.button(text="♻️ Сбросить", callback_data=ms_callback("reset", qkey))
+    kb.button(text="💾 Сохранить", callback_data=ms_callback("save", qkey))
+    kb.adjust(1)
     return kb.as_markup()

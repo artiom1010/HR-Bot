@@ -4,14 +4,17 @@ from enum import Enum, unique
 from sqlalchemy import (
     create_engine,
     Column, Integer, BigInteger, String, DateTime,
-    ForeignKey, Text, Enum as PgEnum, CheckConstraint
+    ForeignKey, Text, Enum as PgEnum, UniqueConstraint
 )
 from sqlalchemy.orm import declarative_base, relationship
-from sqlalchemy.pool import StaticPool
+
 
 engine = create_engine("sqlite:///./resume_bot.db", echo=False, future=True)
 
 Base   = declarative_base()
+
+
+
 
 # ───────────────── ПОЛЬЗОВАТЕЛИ ─────────────────
 class User(Base):
@@ -108,6 +111,57 @@ class PaymentLog(Base):
     created_at       = Column(DateTime, default=dt.datetime.utcnow)
 
     order = relationship("Order", backref="payment_logs")
+
+
+
+class AnswerOption(Base):
+    __tablename__ = "answer_options"
+
+    id           = Column(Integer, primary_key=True)
+    question_key = Column(String(32),  nullable=False, index=True)  # напр. 'resume_language', 'strengths'
+    value        = Column(String(64),  nullable=False, index=True)  # slug для callback_data
+    label        = Column(String(255), nullable=False)              # текст на кнопке
+
+    user_id   = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # NULL = глобальная
+    lang      = Column(String(8),   nullable=True)          # 'ru' / 'en' / 'ro' (если нужно)
+    position  = Column(String(128), nullable=True)          # нормализованная должность (для персональных)
+    source    = Column(String(16),  nullable=False, default="static")  # static / ai / manual
+
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+    UniqueConstraint('user_id', 'question_key', 'value', 'source',
+                         name='uix_answer_options_user_qkey_value_source'),
+    )
+
+# ───────────────── ЧЕРНОВИКИ (подвопросы) ─────────────────
+class Draft(Base):
+    __tablename__ = "drafts"
+
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    parent_key = Column(String(32), index=True, nullable=False)   # напр. 'summary'
+    step_key   = Column(String(32), nullable=False)               # напр. 'summary_industry'
+    value      = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    user = relationship("User")
+
+# ───────────────── МУЛЬТИВЫБОР ─────────────────
+class MultiSelect(Base):
+    __tablename__ = "multi_select"
+
+    id           = Column(Integer, primary_key=True)
+    user_id      = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    question_key = Column(String(32),  nullable=False, index=True)  # напр. 'skills'
+    value        = Column(String(64),  nullable=False)              # slug из options (<=64 байт)
+    created_at   = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "question_key", "value", name="uq_ms_user_key_value"),
+    )
+
+
 
 # ── 3. Создать таблицы ──────────────────────────────────────────────
 Base.metadata.create_all(engine)

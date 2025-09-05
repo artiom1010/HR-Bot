@@ -1,173 +1,158 @@
+import re
 import asyncio
-
 from aiogram import Router, F
 from aiogram.filters import Command,CommandStart
 from aiogram.types import Message, CallbackQuery
-
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.orm import Session
-from _database import engine, User
+
+from handlers.ms_repo import get_selected_set
+
 from handlers.db_helpers import (
     get_or_create_user, 
     get_first_unanswered, 
     save_answer, 
     clear_user_answers, 
-    clear_user_drafts)
+    clear_user_drafts, 
+    clear_parent_drafts, 
+    drafts_count,
+    get_drafts_values_ordered,
+    add_draft,
+    replace_draft,
+    pop_personal_wait,
+    set_personal_wait)
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
-from _key import (
-    for_question, 
+from handlers.options_repo import get_options, get_label_for
+from handlers.ai_tasks import chain_generate_after_position
+from _database import engine, User
+from _key import text_or_skip_keyboard, start_keyboard, build_multiselect_kb
+from _utils import (
+    logger,
     CHOICES, 
-    text_or_skip_keyboard, 
-    start_keyboard)
+    INTRO_BEFORE, 
+    QUESTION_FLOW, 
+    START_MESSAGE,
+    SUMMARY_STEPS,
+    PERSONAL_MESSAGE,
+    EXPERIENCE_STEPS)
 
-INTRO_BEFORE = {
-    "summary": ("""
-📋 Отлично!
-Сейчас я буду последовательно задавать тебе вопросы и предлагать варианты ответов.
+from handlers.ms_repo import (
+    get_selected_set, 
+    toggle_selection, 
+    clear_selection, 
+    build_answer_text_from_selection)
 
-Наша цель — достать из тебя достаточно информации, чтобы сделать сильное продающее резюме.
-Мы соберём его по структуре, которая работает лучше всего:
-    1. Обо мне — короткое, цепляющее описание тебя как специалиста.
-    2. Опыт работы — ключевые места, должности, задачи и результаты.
-    3. Достижения — конкретные факты и цифры, которые подтверждают твой профессионализм.
-    4. Образование и курсы — всё, что усиливает твой профиль.
-    5. Навыки и инструменты — твои ключевые компетенции, языки, программы.
-
-💡 Такая структура помогает работодателю быстро увидеть твою ценность и понять, почему стоит пригласить именно тебя.
-
-Готов(а)? Тогда начинаем! 🚀"
-    """),
-}
-
-START_MESSAGE = """
-👋 Привет!
-
-Я — твой персональный помощник по созданию продающего одностраничного резюме.
-Что это значит?
-Это резюме, которое за 1 страницу убедительно показывает твои сильные стороны, опыт и достижения так, чтобы работодатель захотел пригласить тебя на интервью.
-
-💡 Я соберу твою информацию, задам правильные вопросы и помогу сформулировать ответы так, чтобы они выглядели профессионально и привлекательно.
-
-⏱ Всего 10–15 минут — и ты получишь готовое резюме в PDF и Word, адаптированное под вакансию.
-"""
-
-QUESTION_FLOW = [
-    ("main_language", "🌐 На каком языке тебе будет удобнее общаться со мной?"),
-    
-    ("resume_language", "📄 На каком языке ты хотел бы получить итоговое резюме?"),
-    
-    ("resume_goal", """
-💼 C какой целью ты создаёшь резюме?
-
-Это поможет мне выбрать правильный стиль, структуру и акценты, чтобы твоё резюме сработало именно под твою задачу.
-
-💬 Например, резюме для смены профессии будет построено так, чтобы выделить твои универсальные навыки и скрыть пробелы в опыте. А резюме для руководящей должности — подчеркнёт лидерские качества, стратегическое мышление и результаты в цифрах.
-     """),
-    
-    ("target_position", """
-🧭 На какую должность ты хочешь податься?
-(Например: Product Manager, UI/UX Designer, Sales Lead)
-    """),
-    
-    ("job_description", """
-🔍 Скинь описание вакансии текстом, на которую хочешь откликнуться.
-
-📌 Зачем это нужно:
-Я проанализирую ключевые требования работодателя и помогу сформулировать опыт и достижения так, чтобы они максимально совпадали с ожиданиями.
-Это повышает шансы пройти отбор и получить оффер.
-
-Если пока нет — нажми "Пропустить".
-    """),
-    
-    ("summary",         """
-✨ Давай сформируем блок “Обо мне”
-
-💡 Когда мы ответим на эти вопросы, я соберу их в сильное, цепляющее описание, например:
-"Руководитель проектов с 5-летним опытом в IT. Запускаю цифровые продукты под ключ, выстраиваю эффективные команды и процессы. Ориентирован на результат и рост бизнеса."
-     
-Я задам несколько коротких вопросов, а ты можешь:
-    - Выбрать готовый вариант кнопкой
-    - Или написать свой текст
-
-     
-     """),
-    
-    ("experience_1",    "💼 Опиши свой последний/текущий опыт работы."),
-    ("experience_2",    "💼 Опиши предыдущий опыт работы (если есть)."),
-    ("experience_3",    "💼 Опиши ещё один опыт работы (если есть)."),
-    ("achievements",    "🏆 Назови до трёх основных достижений."),
-    ("education",       "🎓 Где ты учился? (ВУЗ/курсы)"),
-    ("skills",          "🛠️ Укажи до шести ключевых навыков, каждый с новой строке."),
-    ("languages",       "🌍 Какие языки знаешь и на каком уровне?"),
-    ("full_name", 
-        "🖋 Отлично, я подвёл итоги твоего опыта и навыков.\n"
-        "Теперь осталось заполнить контактную информацию.\n\n"
-        "Укажи своё имя и фамилию:"
-    ),
-    ("contact_phone",   "📞 Твой номер телефона:"),
-    ("contact_email",   "✉️ Твой e-mail для связи:"),
-    ("contact_links",   "🔗 Ссылки (LinkedIn, GitHub и т.п.), через запятую:"),
-]
 
 router = Router()
+
+# --- constants --- 
+MULTI_SELECT_KEYS = {"summary_tasks", "summary_values"}
+SUMMARY_KEYS = {k for k, _ in SUMMARY_STEPS}
 
 
 async def send_next_with_intro(chat_id: int, next_key: str, user_id: int | None = None):
     intro = INTRO_BEFORE.get(next_key)
     if intro:
         await bot.send_message(chat_id, intro)
-    try:
-        await send_question(chat_id, next_key, user_id)
-    except TypeError:
-        await send_question(chat_id, next_key)
+    await send_question(chat_id, next_key, user_id)
 
 async def send_first_question(chat_id: int, user_db_id: int):
     first_key = QUESTION_FLOW[0][0]
-    await send_question(chat_id, first_key)
+    await send_question(chat_id, first_key, user_db_id)
 
-async def send_question(chat_id: int, qkey: str):
-    prompt = dict(QUESTION_FLOW)[qkey]
-    markup = text_or_skip_keyboard(qkey) if qkey == "job_description" else for_question(qkey)
-    await bot.send_message(chat_id, prompt, reply_markup=markup)
+async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
+    PROMPTS = dict(QUESTION_FLOW)
 
+    # ▶ Если это summary — запускаем мини-мастер
+    if qkey == "summary" and user_id:
+        await bot.send_message(chat_id, PROMPTS[qkey])
+        def _reset():
+            with Session(engine) as s:
+                clear_parent_drafts(s, user_id, "summary")
+                s.commit()
+        await asyncio.to_thread(_reset)
+        await ask_next_summary_step(chat_id, user_id)
+        return
+    
+    pairs = await asyncio.to_thread(get_options, qkey, user_id, None, None)
+    
+    markup = None
+    if qkey in MULTI_SELECT_KEYS and user_id and pairs:
+        # вытягиваем выбранные value из БД
+        def _sel():
+            with Session(engine) as s:
+                return get_selected_set(s, user_id, qkey)
+        selected = await asyncio.to_thread(_sel)
+        markup = build_multiselect_kb(qkey, pairs, selected)
+    elif pairs:
+        kb = InlineKeyboardBuilder()
+        for value, label in pairs:
+            kb.button(text=label, callback_data=f"ans:{qkey}:{value}")
+        kb.adjust(1)
+        markup = kb.as_markup()
+    elif qkey == "job_description":
+        markup = text_or_skip_keyboard(qkey)
 
+    await bot.send_message(chat_id, PROMPTS[qkey], reply_markup=markup)
 
 
 @router.callback_query(F.data.startswith("ans:"))
 async def handle_choice(callback: CallbackQuery):
-    try:
-        _, key, value = callback.data.split(":", 2)
-    except ValueError:
-        await callback.answer("Некорректные данные", show_alert=True)
-        return
-
+    await callback.answer()
+    _, key, value = callback.data.split(":", 2)
     tg_id = callback.from_user.id
 
     def _work():
         with Session(engine) as s:
-            user = s.query(User).filter(User.telegram_id == tg_id).first()
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
             if not user:
                 return None, None, "no_user", None
+            
+            label_db = get_label_for(s, key, value, user.id)
+            label = label_db or dict(CHOICES.get(key, [])).get(value, value)
+
+            # ▶ Подвопросы summary
+            if key.startswith("summary_"):
+                # красивая подпись кнопки
+                label = get_label_for(s, key, value, user.id)
+                add_draft(s, user.id, "summary", key, label)
+                s.commit()
+                return user.id, "summary_step_saved", None, label
+
+            # ♦ Обычные вопросы
             label = dict(CHOICES.get(key, [])).get(value, value)
             save_answer(s, user.id, key, label)
             next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
             return user.id, next_key, None, label
-    user_db_id, next_key, error, label = await asyncio.to_thread(_work)
+
+    user_id, next_key, error, echo_label = await asyncio.to_thread(_work)
     await callback.answer()
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception as e:
+        logger.debug("edit_reply_markup skip: %s", e)
 
     if error == "no_user":
         await callback.message.answer("Напишите /start сначала, пожалуйста.")
         return
-    await callback.message.answer(f"Установлен язык резюме: {label}")
+
+    if echo_label:
+        await callback.message.answer(f"💾 Записал вариант(ы): {echo_label}")
+
+    if next_key == "summary_step_saved":
+        await ask_next_summary_step(callback.message.chat.id, user_id)
+        return
 
     if next_key:
-        await send_question(callback.message.chat.id, next_key)
+        await send_next_with_intro(callback.message.chat.id, next_key, user_id)
     else:
         await callback.message.answer("Спасибо! Всё заполнено.")
-        await create_order_and_run_ai(callback.message, user_db_id)
+        await create_order_and_run_ai(callback.message, user_id)
 
 
-# ----> КОМАНДА /START ---->
+
 @router.message(CommandStart())
 async def start_handler(message: Message):
     tg_id = message.from_user.id
@@ -175,9 +160,7 @@ async def start_handler(message: Message):
     full_name = message.from_user.full_name or ""
 
     # создаём/находим пользователя, но НЕ шлём вопрос
-    await asyncio.to_thread(lambda: (
-        Session(engine),
-    ))
+    await asyncio.to_thread(lambda: (Session(engine),))
     def _work():
         with Session(engine) as s:
             get_or_create_user(s, tg_id, username, full_name)
@@ -194,8 +177,8 @@ async def handle_start(callback: CallbackQuery):
     # скрыть клавиатуру под приветствием (чтобы не жали повторно)
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("edit_reply_markup skip: %s", e)
 
     tg_id = callback.from_user.id
     def _work():
@@ -209,10 +192,11 @@ async def handle_start(callback: CallbackQuery):
     user_id, next_key = await asyncio.to_thread(_work)
 
     if next_key:
-        await send_question(callback.message.chat.id, next_key)
+        await send_next_with_intro(callback.message.chat.id, next_key, user_id)
     else:
         await callback.message.answer("🎉 Все вопросы уже собраны.\n\nИдёт генерация…")
         await create_order_and_run_ai(callback.message, user_id)
+
 
 
 
@@ -224,33 +208,75 @@ async def handle_answer(message: Message):
 
     def _work():
         with Session(engine) as s:
-            user = s.query(User).filter(User.telegram_id == tg_id).first()
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
             if not user:
-                return None, None, "no_user"
-            user_db_id = user.id
-            current_key = get_first_unanswered(s, user_db_id, QUESTION_FLOW)
-            if not current_key:
-                return user_db_id, None, "done"
-            save_answer(s, user_db_id, current_key, text)
-            next_key = get_first_unanswered(s, user_db_id, QUESTION_FLOW)
-            return user_db_id, next_key, None
+                return None, None, "no_user", None
 
-    user_db_id, next_key, error = await asyncio.to_thread(_work)
+            # 🔎 1) Сначала проверяем, ждём ли «личный ввод» для какого-то summary_* подшага
+            awaiting_step = pop_personal_wait(s, user.id)  # вернёт 'summary_tasks'/'summary_values' или None
+            if awaiting_step:
+                # нормализуем ввод: разбить по запятым/переносам, подчистить, собрать красивой строкой
+                parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
+                human = ", ".join(parts) if parts else text
+                # пишем результат ПРЯМО в drafts текущего подшага
+                replace_draft(s, user.id, parent_key="summary", step_key=awaiting_step, value=human)
+                s.commit()
+                return user.id, "summary_step_saved", None, "summary_personal"
+
+            current_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+
+            # ▶ Если мы на шаге summary — это ответ на ТЕКУЩИЙ подвопрос
+            if current_key == "summary":
+                idx = drafts_count(s, user.id, "summary")
+                if idx < len(SUMMARY_STEPS):
+                    step_key, _ = SUMMARY_STEPS[idx]
+                    add_draft(s, user.id, "summary", step_key, text)
+                    s.commit()
+                    return user.id, "summary_step_saved", None, current_key
+
+            # ♦ Иначе обычное сохранение
+            if not current_key:
+                return user.id, None, "done", None
+            save_answer(s, user.id, current_key, text)
+            next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+            return user.id, next_key, None, current_key
+
+    user_id, next_key, error, just_answered_key = await asyncio.to_thread(_work)
 
     if error == "no_user":
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
 
+    # 🔔 ХУК: только что ответили на target_position → запускаем фон
+    if just_answered_key == "target_position":
+        # asyncio.create_task(generate_tasks_options(user_id))
+        # asyncio.create_task(generate_values_options(user_id))
+        asyncio.create_task(chain_generate_after_position(user_id))
+
+    if next_key == "summary_step_saved":
+        await ask_next_summary_step(message.chat.id, user_id)
+        return
+
     if error == "done":
         await message.answer("Все ответы уже собраны. 🚀")
-        await create_order_and_run_ai(message, user_db_id)
+        await create_order_and_run_ai(message, user_id)
         return
 
     if next_key:
-        await send_next_with_intro(message.chat.id, next_key, user_db_id)
+        await send_next_with_intro(message.chat.id, next_key, user_id)
     else:
-        await message.answer("🎉 Спасибо! Всё заполнено.\n\n Ваше резюме генерируется...")
-        await create_order_and_run_ai(message, user_db_id)
+        await message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...")
+        await create_order_and_run_ai(message, user_id)
+
+
+
+
+
+
+
+
+
+
 
 
 @router.message(Command("new_interview"))
@@ -267,23 +293,34 @@ async def new_interview_handler(message: Message):
             return user.id, deleted
 
     user_db_id, deleted = await asyncio.to_thread(_reset)
+
     if not user_db_id:
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
 
     await message.answer(START_MESSAGE, reply_markup=start_keyboard())
-    await send_first_question(message.chat.id, user_db_id)
+    # await send_first_question(message.chat.id, user_db_id)
 
 
 
 @router.callback_query(F.data.startswith("flow:"))
 async def handle_flow(callback: CallbackQuery):
-    _, action, key = callback.data.split(":", 2)
+    await callback.answer()  # снять "спиннер
+    try:
+        _, action, key = callback.data.split(":", 2)
+    except ValueError:
+        return
+
     tg_id = callback.from_user.id
+    chat_id = callback.message.chat.id
 
     if action == "ask":
-        await callback.answer()
-        await callback.message.answer("Ожидаю текст вакансии ...")
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await callback.message.answer("🔖 Отправть текст вакансии, на которую рассматриваешься:")
         return
 
     if action == "skip":
@@ -294,14 +331,188 @@ async def handle_flow(callback: CallbackQuery):
                 save_answer(s, user.id, key, "")
                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
                 return user.id, next_key
+            
         user_id, next_key = await asyncio.to_thread(_work)
-        await callback.answer()
+
         if not user_id:
             await callback.message.answer("Сначала /start.")
             return
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
         await callback.message.answer("Пропущено.")
         if next_key:
             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
         else:
             await callback.message.answer("Спасибо! Всё заполнено.")
             await create_order_and_run_ai(callback.message, user_id)
+
+
+
+
+# SUMMERY STEPS
+
+async def ask_next_summary_step(chat_id: int, user_id: int):
+    # какой по счёту подвопрос уже сохранён?
+    def _count():
+        with Session(engine) as s:
+            return drafts_count(s, user_id, "summary")
+    idx = await asyncio.to_thread(_count)
+
+    # если остались подвопросы — задаём следующий
+    if idx < len(SUMMARY_STEPS):
+        step_key, prompt = SUMMARY_STEPS[idx]
+        pairs = await asyncio.to_thread(get_options, step_key, user_id, None, None)
+        
+        if step_key in MULTI_SELECT_KEYS:
+            def _sel():
+                with Session(engine) as s:
+                    return get_selected_set(s, user_id, step_key)
+            selected = await asyncio.to_thread(_sel)
+            markup = build_multiselect_kb(step_key, pairs, selected)
+            await bot.send_message(chat_id, prompt, reply_markup=markup)
+            return
+        kb = InlineKeyboardBuilder()
+        for val, lab in pairs:
+            kb.button(text=lab, callback_data=f"ans:{step_key}:{val}")
+        kb.adjust(1)
+        markup = kb.as_markup()
+        await bot.send_message(chat_id, prompt, reply_markup=markup)
+        return
+    # иначе — финализируем summary
+    await finalize_summary_and_go_next(chat_id, user_id)
+
+async def finalize_summary_and_go_next(chat_id: int, user_id: int):
+    def _finalize():
+        with Session(engine) as s:
+            parts = get_drafts_values_ordered(s, user_id, "summary")
+            combined = " // ".join(parts) if parts else ""
+            save_answer(s, user_id, "summary", combined)
+            clear_parent_drafts(s, user_id, "summary")
+            next_key = get_first_unanswered(s, user_id, QUESTION_FLOW)
+            return next_key
+    next_key = await asyncio.to_thread(_finalize)
+
+    await bot.send_message(chat_id, "✅ Собрал блок «Обо мне». Едем дальше.")
+    if next_key:
+        await send_next_with_intro(chat_id, next_key, user_id)
+    else:
+        await bot.send_message(chat_id, "🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...")
+        await create_order_and_run_ai(chat_id, user_id)  # или твоя функция
+
+
+
+
+
+
+
+
+
+
+_chat_locks: dict[int, asyncio.Lock] = {}
+def _lock_for(chat_id: int) -> asyncio.Lock:
+    if chat_id not in _chat_locks:
+        _chat_locks[chat_id] = asyncio.Lock()
+    return _chat_locks[chat_id]
+
+@router.callback_query(F.data.startswith("ms:"))
+async def handle_multiselect(callback: CallbackQuery):
+    # формат: ms:<action>:<qkey>[:<value>]
+    parts = callback.data.split(":", 3)
+    _, action, qkey, *rest = parts
+    await callback.answer()  # убираем «спиннер»
+
+    chat_id = callback.message.chat.id
+    tg_id = callback.from_user.id
+
+    async with _lock_for(chat_id):
+        def _work():
+            with Session(engine) as s:
+                user = s.query(User).filter_by(telegram_id=tg_id).first()
+                if not user:
+                    return None, None, "no_user", None
+                
+                if action == "personal":
+                    set_personal_wait(s, user.id, qkey)
+                    s.commit()
+                    return user.id, None, "__await_text__", None
+
+                if action == "toggle":
+                    value = rest[0]
+                    toggle_selection(s, user.id, qkey, value)
+                    s.commit()
+                    selected = get_selected_set(s, user.id, qkey)
+                    # вернём свежий список выбранного
+                    return user.id, selected, None, None
+
+                if action == "reset":
+                    clear_selection(s, user.id, qkey)
+                    s.commit()
+                    return user.id, set(), None, None
+
+                if action == "save":
+                    text = build_answer_text_from_selection(s, user.id, qkey)
+                    if not text.strip():
+                        return user.id, None, "empty", None
+
+                    if qkey in SUMMARY_KEYS:
+                        # КЛЮЧЕВОЕ: сохраняем в drafts родителя 'summary'
+                        replace_draft(s, user.id, parent_key="summary", step_key=qkey, value=text)
+                        clear_selection(s, user.id, qkey)
+                        s.commit()
+                        return user.id, "__continue_summary__", "saved", text
+
+                    # Остальные мультивыборы — по старой схеме
+                    save_answer(s, user.id, qkey, text)
+                    clear_selection(s, user.id, qkey)
+                    next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+                    s.commit()
+                    return user.id, next_key, "saved", text
+
+                return user.id, None, None, None
+
+        user_id, payload, status, echo_text = await asyncio.to_thread(_work)
+        if not user_id:
+            await callback.message.answer("Сначала /start.")
+            return
+        
+        if action == "personal":
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except Exception as e:
+                logger.debug("edit_reply_markup skip: %s", e)
+            await callback.message.answer(PERSONAL_MESSAGE)
+            return
+
+        if action in {"toggle", "reset"}:
+            # перестроить клавиатуру в ТОМ ЖЕ сообщении
+            pairs = await asyncio.to_thread(get_options, qkey, user_id, None, None)
+            markup = build_multiselect_kb(qkey, pairs, payload or set())
+            try:
+                await callback.message.edit_reply_markup(reply_markup=markup)
+            except Exception as e:
+                logger.debug("edit_reply_markup skip: %s", e)
+            return
+
+        if action == "save":
+            await callback.message.edit_reply_markup(reply_markup=None)
+
+            if status == "empty":
+                await callback.answer("Выбери хотя бы один вариант или сбрось выбор.", show_alert=True)
+                return
+
+            # отзеркаливание
+            if echo_text:
+                await callback.message.answer(f"💾 Записал варианты: {echo_text}")
+
+            if payload == "__continue_summary__":
+                # Идём к следующему подшагу (или завершаем summary)
+                await ask_next_summary_step(chat_id, user_id)
+                return
+
+            if payload:
+                await send_next_with_intro(chat_id, payload, user_id)
+            else:
+                await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...")
+                await create_order_and_run_ai(chat_id, user_id)  # см. примечание ниже
