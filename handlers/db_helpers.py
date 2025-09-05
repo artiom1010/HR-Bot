@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session
-from _database import User, Answer, Order, PaynetStatus, ProcessedData
+from sqlalchemy import select, func
+from _database import User, Answer, Order, PaynetStatus, ProcessedData, Draft
+
 
 def get_or_create_user(session: Session, telegram_id: int, username: str, full_name: str) -> User:
     user = session.query(User).filter(User.telegram_id == telegram_id).first()
@@ -64,3 +66,79 @@ def clear_user_drafts(session: Session, user_id: int) -> None:
                .delete(synchronize_session=False)
         session.delete(o)
     session.commit()
+
+
+
+
+# ==============
+# DRAFTS HELPER
+# ==============
+def drafts_count(s, user_id: int, parent_key: str) -> int:
+    return s.execute(
+        select(func.count()).select_from(Draft)
+        .where(Draft.user_id == user_id, Draft.parent_key == parent_key)
+    ).scalar_one()
+
+def add_draft(s, user_id: int, parent_key: str, step_key: str, value: str):
+    s.add(Draft(user_id=user_id, parent_key=parent_key, step_key=step_key, value=value))
+
+def get_drafts_values_ordered(s, user_id: int, parent_key: str) -> list[str]:
+    rows = s.execute(
+        select(Draft).where(Draft.user_id == user_id, Draft.parent_key == parent_key)
+        .order_by(Draft.id.asc())
+    ).scalars().all()
+    return [r.value.strip() for r in rows if r.value and r.value.strip()]
+
+def clear_parent_drafts(s, user_id: int, parent_key: str):
+    s.query(Draft).filter(Draft.user_id == user_id, Draft.parent_key == parent_key)\
+      .delete(synchronize_session=False)
+    
+
+def replace_draft(s, user_id: int, parent_key: str, step_key: str, value: str):
+    s.query(Draft).filter(
+        Draft.user_id == user_id,
+        Draft.parent_key == parent_key,
+        Draft.step_key == step_key
+    ).delete(synchronize_session=False)
+    s.add(Draft(user_id=user_id, parent_key=parent_key, step_key=step_key, value=value))
+
+
+
+
+
+
+# ==============
+# PERSONAL WAIT
+# ==============
+# Флаг ожидания личного ввода для подшага (parent='summary')
+def set_personal_wait(s, user_id: int, step_key: str):
+    # используем drafts как KV-хранилище: parent_key='summary', step_key='<subkey>__await'
+    replace_draft(s, user_id, parent_key="summary", step_key=f"{step_key}__await", value="1")
+
+
+def delete_draft_by_key(s, user_id: int, parent_key: str, step_key: str):
+    s.query(Draft).filter(
+        Draft.user_id == user_id,
+        Draft.parent_key == parent_key,
+        Draft.step_key == step_key
+    ).delete(synchronize_session=False)
+
+
+def get_drafts_by_parent(s, user_id: int, parent_key: str):
+    """Вернёт объекты Draft для данного parent_key (в порядке вставки)."""
+    return s.execute(
+        select(Draft).where(Draft.user_id == user_id, Draft.parent_key == parent_key)
+        .order_by(Draft.id.asc())
+    ).scalars().all()
+
+
+def pop_personal_wait(s, user_id: int) -> str | None:
+    # вернёт step_key ('summary_tasks' или 'summary_values'), если ждём текст
+    rows = get_drafts_by_parent(s, user_id, "summary")
+    for r in rows:
+        if r.step_key.endswith("__await"):
+            base = r.step_key[:-8]  # отрезать "__await"
+            # удалить флаг
+            delete_draft_by_key(s, user_id, "summary", r.step_key)
+            return base
+    return None
