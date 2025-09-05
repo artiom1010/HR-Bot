@@ -60,13 +60,17 @@ CHOICES = {
         ("summary_tasks_analytics", "Аналитика и отчётность"), 
         ("summary_tasks_process", "Внедрение процессов"), 
         ("summary_tasks_marketing", "Маркетинговые кампании"), 
-        ("summary_tasks_other", "Свой вариант") 
+        ("summary_tasks_doc", "Заполнение документации") 
     ],
     "summary_values": [
         ("summary_values_orient", "Ориентация на результат и командную работу"), 
         ("summary_values_trust", "Честность и прозрачность"), 
         ("summary_values_develop", "Постоянное развитие"), 
-        ("summary_values_other", "Свой вариант") 
+        ("summary_values_customer", "Клиентоориентированность"),
+        ("summary_values_ownership", "Личная ответственность и дисциплина"),
+        ("summary_values_initiative", "Инициативность и проактивность"),
+        ("summary_values_adapt", "Гибкость и адаптивность"),
+        ("summary_values_quality", "Качество и внимание к деталям")
     ]
 }
 
