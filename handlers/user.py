@@ -3,10 +3,7 @@ import asyncio
 from aiogram import Router, F
 from aiogram.filters import Command,CommandStart
 from aiogram.types import Message, CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.orm import Session
-
-from handlers.ms_repo import get_selected_set
 
 from handlers.db_helpers import (
     get_or_create_user, 
@@ -17,16 +14,27 @@ from handlers.db_helpers import (
     clear_parent_drafts, 
     drafts_count,
     get_drafts_values_ordered,
+    drafts_completed_count,
     add_draft,
     replace_draft,
     pop_personal_wait,
-    set_personal_wait)
+    set_personal_wait,
+    pop_free_wait,
+    set_free_wait)
+
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
 from handlers.options_repo import get_options, get_label_for
 from handlers.ai_tasks import chain_generate_after_position
 from _database import engine, User
-from _key import text_or_skip_keyboard, start_keyboard, build_multiselect_kb
+
+from _key import (
+    text_or_skip_keyboard, 
+    start_keyboard, 
+    single_select_kb, 
+    build_multiselect_kb,
+    continue_kb)
+
 from _utils import (
     logger,
     CHOICES, 
@@ -47,19 +55,29 @@ from handlers.ms_repo import (
 router = Router()
 
 # --- constants --- 
+SUMMARY_SINGLE_WITH_PERSONAL = {"summary_industry"}
 MULTI_SELECT_KEYS = {"summary_tasks", "summary_values"}
 SUMMARY_KEYS = {k for k, _ in SUMMARY_STEPS}
 
+PAUSE_BEFORE = {"summary"}
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Навигация по вопросам
+# ──────────────────────────────────────────────────────────────────────────────
 async def send_next_with_intro(chat_id: int, next_key: str, user_id: int | None = None):
     intro = INTRO_BEFORE.get(next_key)
+    if intro and next_key in PAUSE_BEFORE:
+        await bot.send_message(chat_id, intro, reply_markup=continue_kb(next_key))
+        return
     if intro:
         await bot.send_message(chat_id, intro)
     await send_question(chat_id, next_key, user_id)
 
+
 async def send_first_question(chat_id: int, user_db_id: int):
     first_key = QUESTION_FLOW[0][0]
     await send_question(chat_id, first_key, user_db_id)
+
 
 async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
     PROMPTS = dict(QUESTION_FLOW)
@@ -86,17 +104,17 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
         selected = await asyncio.to_thread(_sel)
         markup = build_multiselect_kb(qkey, pairs, selected)
     elif pairs:
-        kb = InlineKeyboardBuilder()
-        for value, label in pairs:
-            kb.button(text=label, callback_data=f"ans:{qkey}:{value}")
-        kb.adjust(1)
-        markup = kb.as_markup()
+        allow_personal = qkey in SUMMARY_SINGLE_WITH_PERSONAL
+        markup = single_select_kb(qkey, pairs, allow_personal=allow_personal, per_row=1)
     elif qkey == "job_description":
         markup = text_or_skip_keyboard(qkey)
 
     await bot.send_message(chat_id, PROMPTS[qkey], reply_markup=markup)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Обработчик одиночного выбора (inline buttons ans:<qkey>:<value>)
+# ──────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data.startswith("ans:"))
 async def handle_choice(callback: CallbackQuery):
     await callback.answer()
@@ -127,7 +145,6 @@ async def handle_choice(callback: CallbackQuery):
             return user.id, next_key, None, label
 
     user_id, next_key, error, echo_label = await asyncio.to_thread(_work)
-    await callback.answer()
 
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
@@ -153,23 +170,22 @@ async def handle_choice(callback: CallbackQuery):
 
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# /start
+# ──────────────────────────────────────────────────────────────────────────────
 @router.message(CommandStart())
 async def start_handler(message: Message):
     tg_id = message.from_user.id
     username = message.from_user.username or ""
     full_name = message.from_user.full_name or ""
 
-    # создаём/находим пользователя, но НЕ шлём вопрос
     await asyncio.to_thread(lambda: (Session(engine),))
     def _work():
         with Session(engine) as s:
             get_or_create_user(s, tg_id, username, full_name)
     await asyncio.to_thread(_work)
+    await message.answer(START_MESSAGE,reply_markup=start_keyboard())
 
-    await message.answer(
-        START_MESSAGE,
-        reply_markup=start_keyboard()
-        )
 
 @router.callback_query(F.data == "starts")
 async def handle_start(callback: CallbackQuery):
@@ -199,8 +215,9 @@ async def handle_start(callback: CallbackQuery):
 
 
 
-
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Ответы текстом
+# ──────────────────────────────────────────────────────────────────────────────
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_answer(message: Message):
     tg_id = message.from_user.id
@@ -212,16 +229,26 @@ async def handle_answer(message: Message):
             if not user:
                 return None, None, "no_user", None
 
+            # 0) Свободный текст для ЛЮБОГО ключа (универсальный флаг __free__)
+            free_qkey = pop_free_wait(s, user.id)
+            if free_qkey:
+                if free_qkey.startswith("summary_"):
+                    add_draft(s, user.id, "summary", free_qkey, text)
+                    s.commit()
+                    return user.id, "summary_step_saved", None, free_qkey
+                save_answer(s, user.id, free_qkey, text)
+                next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+
+                return user.id, next_key, None, free_qkey
+
             # 🔎 1) Сначала проверяем, ждём ли «личный ввод» для какого-то summary_* подшага
-            awaiting_step = pop_personal_wait(s, user.id)  # вернёт 'summary_tasks'/'summary_values' или None
+            awaiting_step = pop_personal_wait(s, user.id)
             if awaiting_step:
-                # нормализуем ввод: разбить по запятым/переносам, подчистить, собрать красивой строкой
                 parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
                 human = ", ".join(parts) if parts else text
-                # пишем результат ПРЯМО в drafts текущего подшага
                 replace_draft(s, user.id, parent_key="summary", step_key=awaiting_step, value=human)
                 s.commit()
-                return user.id, "summary_step_saved", None, "summary_personal"
+                return user.id, "summary_step_saved", None, awaiting_step
 
             current_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
 
@@ -232,7 +259,7 @@ async def handle_answer(message: Message):
                     step_key, _ = SUMMARY_STEPS[idx]
                     add_draft(s, user.id, "summary", step_key, text)
                     s.commit()
-                    return user.id, "summary_step_saved", None, current_key
+                    return user.id, "summary_step_saved", None, step_key
 
             # ♦ Иначе обычное сохранение
             if not current_key:
@@ -249,8 +276,6 @@ async def handle_answer(message: Message):
 
     # 🔔 ХУК: только что ответили на target_position → запускаем фон
     if just_answered_key == "target_position":
-        # asyncio.create_task(generate_tasks_options(user_id))
-        # asyncio.create_task(generate_values_options(user_id))
         asyncio.create_task(chain_generate_after_position(user_id))
 
     if next_key == "summary_step_saved":
@@ -265,20 +290,13 @@ async def handle_answer(message: Message):
     if next_key:
         await send_next_with_intro(message.chat.id, next_key, user_id)
     else:
-        await message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...")
+        await message.answer("🎉 Спасибо! Всё заполнено.")
         await create_order_and_run_ai(message, user_id)
 
 
-
-
-
-
-
-
-
-
-
-
+# ──────────────────────────────────────────────────────────────────────────────
+# /new_interview — полная очистка
+# ──────────────────────────────────────────────────────────────────────────────
 @router.message(Command("new_interview"))
 async def new_interview_handler(message: Message):
     tg_id = message.from_user.id
@@ -292,17 +310,19 @@ async def new_interview_handler(message: Message):
             clear_user_drafts(s, user.id)              # ← опционально
             return user.id, deleted
 
-    user_db_id, deleted = await asyncio.to_thread(_reset)
+    user_db_id, _ = await asyncio.to_thread(_reset)
 
     if not user_db_id:
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
 
     await message.answer(START_MESSAGE, reply_markup=start_keyboard())
-    # await send_first_question(message.chat.id, user_db_id)
 
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Кнопки «flow:...»
+# ──────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data.startswith("flow:"))
 async def handle_flow(callback: CallbackQuery):
     await callback.answer()  # снять "спиннер
@@ -320,7 +340,22 @@ async def handle_flow(callback: CallbackQuery):
         except Exception:
             pass
 
-        await callback.message.answer("🔖 Отправть текст вакансии, на которую рассматриваешься:")
+        # ставим флаг универсального ожидания текста для ЛЮБОГО ключа
+        def _mark_wait():
+            with Session(engine) as s:
+                user = s.query(User).filter_by(telegram_id=tg_id).first()
+                if not user:
+                    return None
+                set_free_wait(s, user.id, key)
+                s.commit()
+                return user.id
+
+        user_id = await asyncio.to_thread(_mark_wait)
+        if not user_id:
+            await callback.message.answer("Сначала /start.")
+            return
+
+        await callback.message.answer(PERSONAL_MESSAGE)
         return
 
     if action == "skip":
@@ -343,7 +378,7 @@ async def handle_flow(callback: CallbackQuery):
             pass
         await callback.message.answer("Пропущено.")
         if next_key:
-            await send_next_with_intro(callback.message.chat.id, next_key, user_id)
+            await send_next_with_intro(chat_id, next_key, user_id)
         else:
             await callback.message.answer("Спасибо! Всё заполнено.")
             await create_order_and_run_ai(callback.message, user_id)
@@ -351,20 +386,47 @@ async def handle_flow(callback: CallbackQuery):
 
 
 
-# SUMMERY STEPS
+# ──────────────────────────────────────────────────────────────────────────────
+# Мастер summary
+# ──────────────────────────────────────────────────────────────────────────────
+@router.callback_query(F.data.startswith("cont:"))
+async def handle_continue(callback: CallbackQuery):
+    await callback.answer()
+    _, next_key = callback.data.split(":", 1)
+
+    # спрячем кнопку под сообщением с интро
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    # найдём user_id по tg_id (нужно для send_question)
+    tg_id = callback.from_user.id
+    def _get_user_id():
+        with Session(engine) as s:
+            u = s.query(User).filter_by(telegram_id=tg_id).first()
+            return u.id if u else None
+    user_id = await asyncio.to_thread(_get_user_id)
+    if not user_id:
+        await callback.message.answer("Сначала /start, пожалуйста.")
+        return
+
+    # продолжаем обычный поток
+    await send_question(callback.message.chat.id, next_key, user_id)
+
 
 async def ask_next_summary_step(chat_id: int, user_id: int):
     # какой по счёту подвопрос уже сохранён?
     def _count():
         with Session(engine) as s:
-            return drafts_count(s, user_id, "summary")
+            return drafts_completed_count(s, user_id, "summary")
     idx = await asyncio.to_thread(_count)
 
     # если остались подвопросы — задаём следующий
     if idx < len(SUMMARY_STEPS):
         step_key, prompt = SUMMARY_STEPS[idx]
         pairs = await asyncio.to_thread(get_options, step_key, user_id, None, None)
-        
+
         if step_key in MULTI_SELECT_KEYS:
             def _sel():
                 with Session(engine) as s:
@@ -373,15 +435,13 @@ async def ask_next_summary_step(chat_id: int, user_id: int):
             markup = build_multiselect_kb(step_key, pairs, selected)
             await bot.send_message(chat_id, prompt, reply_markup=markup)
             return
-        kb = InlineKeyboardBuilder()
-        for val, lab in pairs:
-            kb.button(text=lab, callback_data=f"ans:{step_key}:{val}")
-        kb.adjust(1)
-        markup = kb.as_markup()
+
+        allow_personal = step_key in SUMMARY_SINGLE_WITH_PERSONAL
+        markup = single_select_kb(step_key, pairs, allow_personal=allow_personal, per_row=1)
         await bot.send_message(chat_id, prompt, reply_markup=markup)
         return
-    # иначе — финализируем summary
     await finalize_summary_and_go_next(chat_id, user_id)
+
 
 async def finalize_summary_and_go_next(chat_id: int, user_id: int):
     def _finalize():
@@ -403,13 +463,46 @@ async def finalize_summary_and_go_next(chat_id: int, user_id: int):
 
 
 
+@router.callback_query(F.data.startswith("free:"))
+async def handle_free(callback: CallbackQuery):
+    await callback.answer()
+    try:
+        _, action, qkey = callback.data.split(":", 2)
+    except ValueError:
+        return
+    
+    if action != "ask":
+        return
+    tg_id = callback.from_user.id
+
+    def _mark_wait():
+        with Session(engine) as s:
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
+            if not user:
+                return None
+            set_free_wait(s, user.id, qkey)
+            s.commit()
+            return user.id
+
+    user_id = await asyncio.to_thread(_mark_wait)
+    if not user_id:
+        await callback.message.answer("Сначала /start.")
+        return
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    await callback.message.answer(PERSONAL_MESSAGE)
 
 
 
 
 
-
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Мультиселект
+# ──────────────────────────────────────────────────────────────────────────────
 _chat_locks: dict[int, asyncio.Lock] = {}
 def _lock_for(chat_id: int) -> asyncio.Lock:
     if chat_id not in _chat_locks:
@@ -418,7 +511,6 @@ def _lock_for(chat_id: int) -> asyncio.Lock:
 
 @router.callback_query(F.data.startswith("ms:"))
 async def handle_multiselect(callback: CallbackQuery):
-    # формат: ms:<action>:<qkey>[:<value>]
     parts = callback.data.split(":", 3)
     _, action, qkey, *rest = parts
     await callback.answer()  # убираем «спиннер»
@@ -504,7 +596,7 @@ async def handle_multiselect(callback: CallbackQuery):
 
             # отзеркаливание
             if echo_text:
-                await callback.message.answer(f"💾 Записал варианты: {echo_text}")
+                await callback.message.answer(f"💾 Записал вариант(ы): {echo_text}")
 
             if payload == "__continue_summary__":
                 # Идём к следующему подшагу (или завершаем summary)
