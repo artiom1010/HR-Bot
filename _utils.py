@@ -42,7 +42,7 @@ CHOICES = {
         ("summary_industry_log", "Логистика"),
         ("summary_industry_prod", "Производство"),
         ("summary_industry_edu", "Образование"),
-        ("summary_industry_auto", "Автобизнес")
+        ("summary_industry_other", "Автобизнес")
     ],
     "summary_experience": [
         ("summary_experience_no", "Нет опыта"), 
@@ -185,6 +185,7 @@ QUESTION_FLOW = [
 
 
 
+
 PERSONAL_MESSAGE = """
-📝 Напиши свои вариант(ы) через запятую или с новой строки:
+🔖 Отправь свои вариант(ы) через запятую или с новой строки:
 """

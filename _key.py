@@ -12,6 +12,13 @@ def start_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def continue_kb(next_key: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🚀 Да, поехали!", callback_data=f"cont:{next_key}")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def get_payment_keyboard(pay_url: str) -> InlineKeyboardMarkup:
     """
     • 1-я кнопка – сразу открывает форму PayNet
@@ -43,6 +50,10 @@ def get_dev_payment_keyboard(order_id: int) -> InlineKeyboardMarkup:
 
 
 
+# ==============
+# FLOW KEYBOARDS
+# ==============
+
 def text_or_skip_keyboard(key: str):
     kb = InlineKeyboardBuilder()
     kb.button(text="📤 Отправить вакансию", callback_data=f"flow:ask:{key}")
@@ -54,6 +65,7 @@ def text_or_skip_keyboard(key: str):
 def ms_callback(action: str, qkey: str, value: str | None = None) -> str:
     return f"ms:{action}:{qkey}" + (f":{value}" if value else "")
 
+
 def build_multiselect_kb(qkey: str, pairs: List[Tuple[str, str]], selected: Set[str]):
     kb = InlineKeyboardBuilder()
     for value, label in pairs:
@@ -64,4 +76,15 @@ def build_multiselect_kb(qkey: str, pairs: List[Tuple[str, str]], selected: Set[
     kb.button(text="♻️ Сбросить", callback_data=ms_callback("reset", qkey))
     kb.button(text="💾 Сохранить", callback_data=ms_callback("save", qkey))
     kb.adjust(1)
+    return kb.as_markup()
+
+
+# ▼ универсальная клавиатура для одиночных шагов
+def single_select_kb(qkey: str, pairs: list[tuple[str, str]], *, allow_personal: bool = False, per_row: int = 1):
+    kb = InlineKeyboardBuilder()
+    for val, lab in pairs:
+        kb.button(text=lab, callback_data=f"ans:{qkey}:{val}")
+    if allow_personal:
+        kb.button(text="🧑‍💼 Свой вариант", callback_data=f"free:ask:{qkey}")
+    kb.adjust(per_row)
     return kb.as_markup()
