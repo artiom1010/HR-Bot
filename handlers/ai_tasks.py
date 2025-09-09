@@ -1,10 +1,12 @@
+# handlers/ai_tasks.py
 import re
 import json
-import httpx
 import asyncio
 import logging
 import random
 from typing import List, Dict, Optional
+
+import httpx
 
 from _conf import DO_AGENT_URL, DO_API_TOKEN
 from handlers.options_repo import (
@@ -14,9 +16,6 @@ from handlers.options_repo import (
 )
 
 log = logging.getLogger(__name__)
-
-
-
 
 # =========================
 # УТИЛИТЫ
@@ -35,7 +34,6 @@ def _clean_label(label: str, max_len: int = 32) -> str:
     lab = lab.strip(' "\'')
     return lab[:max_len].strip()
 
-
 def _ensure_unique_7_8(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
     seen = set()
@@ -51,7 +49,6 @@ def _ensure_unique_7_8(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
     if len(out) < 7:
         raise ValueError("Нужно 7–8 уникальных пунктов")
     return out[:8]
-
 
 def _parse_items(raw_text: str) -> List[Dict[str, str]]:
     """Принимаем строку с JSON-массивом и возвращаем нормализованный список словарей."""
@@ -69,7 +66,6 @@ def _parse_items(raw_text: str) -> List[Dict[str, str]]:
         cleaned.append({"value": val, "label": lab})
     return _ensure_unique_7_8(cleaned)
 
-
 def _map_lang_code(lang_answer: Optional[str]) -> str:
     """Грубо приводим «RU — на русском»/«ENG — ...» к ru/en/ro."""
     if not lang_answer:
@@ -83,57 +79,81 @@ def _map_lang_code(lang_answer: Optional[str]) -> str:
 
 
 
-
-
 # =========================
-# ГЕНЕРАЦИЯ ПРОМПТОВ
+# ПРОМПТЫ
 # =========================
 
 def _build_tasks_prompt(position: str, lang_code: str) -> str:
     return f"""
-ЗАДАЧА:
-Сгенерируй список ключевых рабочих задач (skills/tasks) для роли "{position}".
-Результат будет показан пользователю как кнопки в Telegram, на языке "{lang_code}".
-Нужно отдать РОВНО 7 или 8 коротких, конкретных задач уровня «чем человек занимается каждый день».
+Сгенерируй РАБОЧИЕ ЗАДАЧИ (tasks) для роли "{position}".
+Язык меток (label): "{lang_code}".
 
-ТРЕБОВАНИЯ:
-- Строгий JSON-ответ без пояснений и без обрамляющих подсказок.
-- Массив объектов с полями:
-  {{ "value": "<slug-en-kebab-case>", "label": "<короткий текст на {lang_code}>" }}
-- "label": до 30–45 символов, без кавычек и эмодзи.
-- "value": латиница, kebab-case, уникальная (напр. "risk-management").
-- Без повторов и почти-синонимов.
-- Фокус на прикладные действия, не абстрактные качества.
+ТРЕБОВАНИЯ К ВЫВОДУ
+- Верни СТРОГО JSON-массив из 8 объектов без пояснений и без бэктиков.
+- Каждый объект: {{"value":"<slug-en-kebab>", "label":"<короткая фраза на {lang_code}>"}}
+- "label":
+  • 30–65 символов, простая речь, без кавычек и эмодзи;
+  • обязательно «действие + объект/контекст», а не одно слово;
+  • начинай с глагола или отглагольной формы (напр. «Проводить код-ревью по чек-листу», «Поддерживать CI/CD пайплайн», «Обслуживать гостей по стандарту»).
+- "value":
+  • латиница, kebab-case, уникальные;
+  • не отправляй по одному слову, должно быть полноценное детальное словосочетание;
+  • 3–5 слов, отражающих суть действия (напр. "code-review-checklist", "maintain-ci-cd", "guest-service-standard").
 
-ФОРМАТ ОТВЕТА:
+ПРОВЕРКИ КАЧЕСТВА
+- Запрещены однословные или слишком общие метки («Тестирование», «Оптимизация») без уточнения.
+- Где уместно, добавляй лёгкий контекст («по чек-листу», «перед PR», «по стандарту смены», «в POS-системе», «по SLA»).
+- Если {lang_code} неизвестен — используй русский.
+
+ФОРМАТ ОТВЕТА (пример структуры, НЕ печатать сам пример):
 [
-  {{"value":"<slug-1>","label":"<кнопка 1>"}},
-  {{"value":"<slug-2>","label":"<кнопка 2>"}},
-  ...
+  {{"value":"code-review-checklist","label":"Проводить код-ревью по чек-листу"}},
+  {{"value":"write-unit-tests-before-pr","label":"Писать юнит-тесты перед PR"}}
 ]
 """.strip()
 
+
 def _build_values_prompt(position: str, lang_code: str) -> str:
     return f"""
-Сгенерируй список рабочих ЦЕННОСТЕЙ/ПОДХОДОВ (work values / ways of working)
-для роли "{position}". Язык кнопок: "{lang_code}".
+Сгенерируй рабочие ЦЕННОСТИ/ПОДХОДЫ (work values & ways of working) для роли "{position}".
+Язык меток (label): "{lang_code}".
 
-Требования:
-- Верни СТРОГО JSON-массив из 7 или 8 объектов, без пояснений и без ```.
-- Каждый объект: {{"value":"<slug-en-kebab>", "label":"<короткая фраза на {lang_code}>"}}
-- "label": 30–45 символов, без кавычек и эмодзи; конкретные формулировки:
-  «Ориентация на результат», «Честность и прозрачность», «Командная работа»,
-  «Клиентоцентричность», «Данные вместо мнений», «Непрерывное улучшение» и т.п.
-- "value": латиница, kebab-case, уникальные.
+ТРЕБОВАНИЯ К ВЫВОДУ
+- Верни СТРОГО JSON-массив из 7 или 8 объектов без пояснений и бэктиков.
+- Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<короткая фраза на {lang_code}>"}}
+- "label": 30–65 символов, простая речь, без кавычек и эмодзи.
+- "value": латиница, kebab-case, уникальные, без префиксов.
+- Не более 2 универсальных пунктов (вроде «Командная работа», «Прозрачность»).
+  Минимум 5 пунктов ДОЛЖНЫ описывать поведение, характерное именно для роли "{position}".
+
+ПРОСТОЕ ПРАВИЛО РЕЛЕВАНТНОСТИ (выполни мысленно, НЕ выводи):
+1) Из названия роли "{position}" выведи 3–6 ключевых ежедневных задач, инструментов и контекста.
+   Примеры направления мысли (НЕ печатать):
+   • сервисные роли: гостевой сервис, скорость и порядок, чистота/санитария, касса/POS, обработка жалоб;
+   • начинающий разработчик: читаемый код, мелкие коммиты, ревью/PR-дисциплина, базовые тесты, запрос фидбэка, ведение задач;
+   • офисные/менеджерские: приоритизация задач, коммуникации со стейкхолдерами, контроль сроков/рисков, фиксация решений.
+2) Преобразуй эти задачи в поведенческие ценности/подходы: конкретные формулировки
+   («POS-операции без ошибок», «Малые фокусные коммиты ежедневно», «Чистота по чек-листу смены», «Риск-лист обновляется своевременно»).
+3) Удали дубли и обобщённые синонимы. Сформируй 7–8 уникальных пунктов.
+
+ПРОВЕРКИ КАЧЕСТВА
+- Каждый "label" должен явно чувствоваться «про эту работу», а не про любую.
+- Избегай пустых слов («эффективность», «ответственность») без конкретики.
+- Сохраняй разнообразие: покрывай разные стороны ежедневной работы роли.
+
+ФОРМАТ ОТВЕТА (пример структуры, НЕ печатать сам пример):
+[
+  {{"value":"small-focused-commits","label":"Малые фокусные коммиты ежедневно"}},
+  {{"value":"pos-accuracy","label":"POS-операции без ошибок"}},
+  ...
+]
 """.strip()
-
 
 
 
 # =========================
 # ЗАПРОС К ТВОЕМУ DO-АГЕНТУ
 # =========================
-
 async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) -> str:
     """
     Шлём промпт в DO-агент и возвращаем ЧИСТЫЙ текст JSON-массива.
@@ -149,6 +169,7 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
     }
     payload = {"messages": [{"role": "user", "content": prompt}], "stream": False}
 
+    # ⬇️ делаем настраиваемый timeout и поднимаем read
     timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=20.0, pool=10.0)
 
     last_err: Optional[Exception] = None
@@ -160,6 +181,7 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
                     headers=headers,
                     json=payload,
                 )
+            # тут нет .raise_for_status() специально, чтобы при 4xx/5xx залогировать тело
             if resp.status_code != 200:
                 body = resp.text[:1000]
                 log.error("ask_llm HTTP %s. Body: %s", resp.status_code, body)
@@ -167,8 +189,10 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
 
             j = resp.json()
 
+            # контент может быть строкой или массивом блоков — разрулим оба варианта
             content = j["choices"][0]["message"]["content"]
             if isinstance(content, list):
+                # иногда агенты возвращают [{"type":"text","text":"..."}]
                 text_parts = []
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "text":
@@ -178,11 +202,13 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
                 content = "".join(text_parts).strip()
 
             raw = str(content).strip()
+            # снимаем ```json ... ``` если есть
             cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
             cleaned = re.sub(r"\n?```$", "", cleaned).strip()
             return cleaned
 
         except httpx.HTTPStatusError as e:
+            # уже залогировано тело выше; дальше не повторяем
             raise
         except (httpx.TimeoutException, httpx.RequestError, KeyError, ValueError) as e:
             last_err = e
@@ -191,9 +217,6 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
             await asyncio.sleep(0.8 * (attempt + 1))
 
     raise RuntimeError(f"ask_llm: ошибки сети/парсинга: {last_err!r}")
-
-
-
 
 
 # =========================
@@ -222,8 +245,8 @@ async def generate_tasks_options(user_id: int) -> None:
         pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
         prompt = _build_tasks_prompt(pos_norm, lang_code)
-        raw = await ask_llm(prompt)
-        items = _parse_items(raw)
+        raw = await ask_llm(prompt)          # ← запрос в DO
+        items = _parse_items(raw)            # ← строгая валидация 7–8
         inserted = replace_user_ai_options(
             user_id=user_id,
             question_key="summary_tasks",
@@ -279,6 +302,11 @@ async def generate_values_options(user_id: int) -> None:
 
 
 
+
+
+
+# ── утилиты ─────────────────────────────────────────────────────────────────
+
 def _lang_code_from_label(label: Optional[str]) -> str:
     """Из того, что хранится в answers (у тебя там часто label),
     вытаскиваем ru/en/ro. По умолчанию ru."""
@@ -301,24 +329,6 @@ def _trim_label(label: str, maxlen: int = 40) -> str:
     lab = " ".join(label.strip().split())
     return (lab[:maxlen]).strip()
 
-def _build_values_prompt(position: str, lang_code: str) -> str:
-    return f"""
-Сгенерируй список рабочих ЦЕННОСТЕЙ/ПОДХОДОВ (work values & ways of working)
-для роли "{position}". Язык кнопок: "{lang_code}".
-
-Требования:
-- Верни СТРОГО JSON-массив из 7 или 8 объектов, без пояснений и бэктиков.
-- Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<короткая фраза на {lang_code}>"}}
-- "label": 30–45 символов, без кавычек и эмодзи; конкретные формулировки (напр. «Ориентация на результат», «Честность и прозрачность», «Ответственность за результат», «Клиентоцентричность», «Данные вместо мнений», «Непрерывное улучшение», «Командная работа», «Проактивная коммуникация»).
-- "value": латиница, kebab-case, уникальные.
-
-Формат ответа (пример структуры, НЕ списком):
-[
-  {{"value":"result-orientation", "label":"Ориентация на результат"}},
-  {{"value":"transparency", "label":"Честность и прозрачность"}},
-  ...
-]
-""".strip()
 
 async def _call_llm_list(prompt: str, *, timeout_s: float = 12.0) -> Optional[List[dict]]:
     headers = {"Authorization": f"Bearer {DO_API_TOKEN}", "Content-Type": "application/json"}
@@ -331,6 +341,7 @@ async def _call_llm_list(prompt: str, *, timeout_s: float = 12.0) -> Optional[Li
                 r = await client.post(f"{DO_AGENT_URL}/api/v1/chat/completions", headers=headers, json=payload)
                 r.raise_for_status()
                 raw = r.json()["choices"][0]["message"]["content"].strip()
+            # снимаем ```json ... ```
             if raw.startswith("```"):
                 raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
                 raw = re.sub(r"\n?```$", "", raw).strip()
@@ -338,6 +349,7 @@ async def _call_llm_list(prompt: str, *, timeout_s: float = 12.0) -> Optional[Li
             data = json.loads(raw)
             if isinstance(data, list):
                 return data
+            # иногда приезжает {"items":[...]}
             if isinstance(data, dict) and isinstance(data.get("items"), list):
                 return data["items"]
             return None
@@ -356,6 +368,7 @@ def _normalize_items(raw: List[dict]) -> List[dict]:
         val = (it.get("value") or _slugify(lab))
         val = _slugify(val)
         if val in seen:
+            # гарантируем уникальность
             k, base = 2, val
             while val in seen:
                 val = f"{base}-{k}"
@@ -364,7 +377,7 @@ def _normalize_items(raw: List[dict]) -> List[dict]:
         out.append({"value": val, "label": lab})
         if len(out) == 8:
             break
-
+    # минимум 7
     return out if len(out) >= 7 else []
 
 # ── публичная корутина ───────────────────────────────────────────────────────
@@ -384,6 +397,7 @@ async def generate_values_options(user_id: int) -> None:
     """
     async with _lock_for(user_id):
         try:
+            # 1) контекст
             ctx = get_user_context(user_id)
             position_raw: str = (ctx.get("position") or "").strip()
             if not position_raw:
@@ -393,8 +407,11 @@ async def generate_values_options(user_id: int) -> None:
             lang_code = _lang_code_from_label(ctx.get("lang"))
             pos_norm  = normalize_position(position_raw) or position_raw  # на всякий
 
+            # 2) промпт
             prompt = _build_values_prompt(pos_norm, lang_code)
 
+            # 3) запрос к LLM с усиленными таймаутами/ретраями
+            #    (если у тебя _call_llm_list уже имеет retries — просто передаём «подлиннее» read_timeout)
             attempts = 3
             raw_list: Optional[list] = None
             for i in range(attempts):
@@ -402,6 +419,7 @@ async def generate_values_options(user_id: int) -> None:
                     raw_list = await _call_llm_list(prompt, timeout_s=60.0)
                     break
                 except Exception as e:
+                    # экспоненциальный backoff + небольшой джиттер
                     sleep_s = (1.0 * (2 ** i)) + random.uniform(0.0, 0.4)
                     log.warning("values LLM try %s/%s failed: %s; sleep %.1fs",
                                 i+1, attempts, e, sleep_s)
@@ -411,6 +429,7 @@ async def generate_values_options(user_id: int) -> None:
                 log.warning("values: LLM returned nothing (user_id=%s, pos=%r)", user_id, pos_norm)
                 return
 
+            # 4) нормализация/валидация
             try:
                 items = _normalize_items(raw_list)
             except Exception as e:
@@ -421,6 +440,7 @@ async def generate_values_options(user_id: int) -> None:
                 log.warning("values: empty/invalid after normalize (user_id=%s, pos=%r)", user_id, pos_norm)
                 return
 
+            # 5) только теперь — запись в БД (замена персональных AI-опций)
             inserted = await asyncio.to_thread(
                 replace_user_ai_options,
                 user_id,
@@ -437,8 +457,8 @@ async def generate_values_options(user_id: int) -> None:
 
 async def chain_generate_after_position(user_id: int):
     try:
-        await generate_tasks_options(user_id)
-        await asyncio.sleep(3)
-        await generate_values_options(user_id)
+        await generate_tasks_options(user_id)          # summary_tasks
+        await asyncio.sleep(3)                       # крошечная пауза, чтоб разгрузить агент
+        await generate_values_options(user_id)         # summary_values
     except Exception as e:
         log.exception("chain_generate_after_position: %s", e)
