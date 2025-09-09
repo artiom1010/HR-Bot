@@ -10,9 +10,15 @@ from _utils import logger
 
 PROMPT_TEMPLATE = """Ты опытный IT-рекрутер с 20-летней практикой.
 
-Тебе даны сырые ответы соискателя. Перепиши их так, чтобы
-выглядело как топ-резюме для вакансий; где не хватает информации –
-красиво дополни.
+Твоя задача — переписать их так, чтобы получилось топ-резюме под вакансию, корректируя стиль, структуру и терминологию. Если чего-то не хватает — делай деликатные правки и безопасные допущения.
+
+⚠️ ЯЗЫК И ГЕНДЕР
+1) ВСЕГДА соблюдай язык из поля resume_language: весь текст на этом языке.
+2) Определи грамматический род автора по данным (приоритет по порядку):
+   a) если явно указан пол/местоимения — используй их;
+   b) иначе попытайся вывести из full_name (имя/окончания/частые соответствия);
+3) Для русского языка корректируй род в прошедшем времени, прилагательных, причастиях и возможных гендерных вариантах должностей («Тестировщица»/«Тестировщик»). Если в индустрии нейтральная форма общепринята (например, «разработчик»), допускается нейтральная мужская форма без сексистских клише.
+4) Для английского языка: «he/him», «she/her» при явном поле; если род не ясен — используй нейтральное «they/them» и без «Mr./Ms.».
 
 ❗️Верни ТОЛЬКО JSON-объект с точными ключами:
 {{
@@ -50,6 +56,8 @@ PROMPT_TEMPLATE = """Ты опытный IT-рекрутер с 20-летней 
     ]
   }}
 ]
+• Ответственности — деловые буллиты в нужном языке; избегай «я» и разговорных слов.
+• Где возможно, добавляй измеримые результаты (%, $, количество, скорость, время).
 
 Исходные ответы пользователя:
 {answers_block}
@@ -59,7 +67,7 @@ PROMPT_TEMPLATE = """Ты опытный IT-рекрутер с 20-летней 
 REQUIRED_KEYS = [
     "cv_naming",
     "career_summary",
-    "experiences_json",          # ← новый
+    "experiences_json",
     "education_details",
     "languages",
     "hard_skills",
@@ -89,70 +97,7 @@ async def build_prompt(user_id: int) -> str:
     return PROMPT_TEMPLATE.format(answers_block=block)
 
 
-# async def call_do_genai(prompt: str) -> dict | None:
-#     """Выполняет запрос к DO-агенту и возвращает JSON-ответ."""
-#     logger.info("PROMPT TO DO:\n%s", prompt)      # ← строка №
 
-#     headers = {
-#         "Content-Type": "application/json",
-#         "Authorization": f"Bearer {DO_API_TOKEN}"
-#     }
-#     payload = {"messages": [{"role": "user", "content": prompt}], "stream": False}
-
-#     async with httpx.AsyncClient(timeout=60) as client:
-#         try:
-#             resp = await client.post(
-#                 f"{DO_AGENT_URL}/api/v1/chat/completions",
-#                 headers=headers,
-#                 json=payload
-#             )
-#             resp.raise_for_status()
-
-#             raw_content = resp.json()["choices"][0]["message"]["content"]
-#             logger.info("RAW REPLY FROM DO:\n%r", raw_content)
-
-#             # ── пытаемся распарсить как JSON ──
-#             try:
-#                 data = json.loads(raw_content)
-#             except json.JSONDecodeError:
-#                 cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", raw_content.strip())
-#                 cleaned = re.sub(r"\n?```$", "", cleaned).strip()
-#                 try:
-#                     data = json.loads(cleaned)
-#                 except json.JSONDecodeError:
-#                     logger.error("GenAI вернул не-JSON")
-#                     return None
-
-#             # ── валидация ───────────────────────────────
-#             for k in REQUIRED_KEYS:
-#                 data.setdefault(k, "")
-
-#             exp = data.get("experiences_json")
-#             if isinstance(exp, list):
-#                 data["experiences_json"] = json.dumps(exp, ensure_ascii=False)
-#             elif isinstance(exp, str):
-#                 data["experiences_json"] = exp.strip()
-#             else:
-#                 data["experiences_json"] = "[]"
-
-#             # 2) теперь (!) приводим остальные значения к строке
-#             for k in REQUIRED_KEYS:
-#                 if k != "experiences_json":          # не трогаем уже-гото­вый JSON
-#                     data[k] = str(data.get(k, ""))
-            
-#             logger.debug("Fixed experiences_json: %s", data["experiences_json"][:120])
-
-#             # удаляем лишние ключи, если пришли
-#             data = {k: data.get(k, "") for k in REQUIRED_KEYS}
-
-#             return data   
-#         except (httpx.HTTPError, KeyError) as e:
-#             logger.error(f"GenAI error: {e}")
-#             return None
-
-
-import asyncio
-import httpx
 
 async def call_do_genai(prompt: str) -> dict | None:
     logger.info("PROMPT TO DO:\n%s", prompt)
