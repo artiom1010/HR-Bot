@@ -3,17 +3,19 @@ import re
 import json
 import asyncio
 import logging
-import random
+import httpx
 from typing import List, Dict, Optional
 
-import httpx
+from sqlalchemy.orm import Session
 
+from _database import engine, User
 from _conf import DO_AGENT_URL, DO_API_TOKEN
 from handlers.options_repo import (
     get_user_context,
     replace_user_ai_options,
     normalize_position,
 )
+from alerts import alert, alert_on_exception
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ def _clean_label(label: str, max_len: int = 32) -> str:
     lab = lab.strip(' "\'')
     return lab[:max_len].strip()
 
+
 def _ensure_unique_7_8(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
     seen = set()
@@ -49,6 +52,7 @@ def _ensure_unique_7_8(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
     if len(out) < 7:
         raise ValueError("Нужно 7–8 уникальных пунктов")
     return out[:8]
+
 
 def _parse_items(raw_text: str) -> List[Dict[str, str]]:
     """Принимаем строку с JSON-массивом и возвращаем нормализованный список словарей."""
@@ -66,6 +70,7 @@ def _parse_items(raw_text: str) -> List[Dict[str, str]]:
         cleaned.append({"value": val, "label": lab})
     return _ensure_unique_7_8(cleaned)
 
+
 def _map_lang_code(lang_answer: Optional[str]) -> str:
     """Грубо приводим «RU — на русском»/«ENG — ...» к ru/en/ro."""
     if not lang_answer:
@@ -77,6 +82,13 @@ def _map_lang_code(lang_answer: Optional[str]) -> str:
         return "ro"
     return "ru"
 
+
+def get_user_identity(user_id: int) -> tuple[str, str, int | None]:
+    with Session(engine) as s:
+        u = s.get(User, user_id)
+        if not u:
+            return "", "", None
+        return (u.username or "", u.full_name or "", getattr(u, "tg_id", None))
 
 
 # =========================
@@ -181,7 +193,6 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
                     headers=headers,
                     json=payload,
                 )
-            # тут нет .raise_for_status() специально, чтобы при 4xx/5xx залогировать тело
             if resp.status_code != 200:
                 body = resp.text[:1000]
                 log.error("ask_llm HTTP %s. Body: %s", resp.status_code, body)
@@ -189,10 +200,8 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
 
             j = resp.json()
 
-            # контент может быть строкой или массивом блоков — разрулим оба варианта
             content = j["choices"][0]["message"]["content"]
             if isinstance(content, list):
-                # иногда агенты возвращают [{"type":"text","text":"..."}]
                 text_parts = []
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "text":
@@ -208,7 +217,6 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
             return cleaned
 
         except httpx.HTTPStatusError as e:
-            # уже залогировано тело выше; дальше не повторяем
             raise
         except (httpx.TimeoutException, httpx.RequestError, KeyError, ValueError) as e:
             last_err = e
@@ -223,6 +231,7 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
 # ОСНОВНЫЕ ФОНОВЫЕ ЗАДАЧИ
 # =========================
 
+@alert_on_exception(ttl=1)
 async def generate_tasks_options(user_id: int) -> None:
     """
     Поток:
@@ -255,12 +264,15 @@ async def generate_tasks_options(user_id: int) -> None:
             items=items,
         )
         log.info("user_id=%s: tasks inserted=%s lang=%s pos=%s",
-                 user_id, inserted, lang_code, pos_norm)
+                        user_id, inserted, lang_code, pos_norm)
 
     except Exception as e:
         log.exception("user_id=%s: generate_tasks_options failed: %s", user_id, e)
 
+    return [it.get("label","") for it in items if it.get("label")]
 
+
+@alert_on_exception(ttl=1)
 async def generate_values_options(user_id: int) -> None:
     """
     Генерирует 7–8 пунктов для мультивыбора 'summary_values'
@@ -278,7 +290,6 @@ async def generate_values_options(user_id: int) -> None:
         pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
         prompt = _build_values_prompt(pos_norm, lang_code)
-        # raw    = await ask_llm(prompt)        # запрос к твоему агенту
         raw    = await ask_llm(prompt, read_timeout=75.0, retries=1)
         items  = _parse_items(raw)            # нормализация + 7–8 уникальных
 
@@ -295,170 +306,36 @@ async def generate_values_options(user_id: int) -> None:
     except Exception as e:
         log.exception("user_id=%s: generate_values_options failed: %s", user_id, e)
 
+    return [it.get("label","") for it in items if it.get("label")]
 
 
-
-
-
-
-
-
-
-
-# ── утилиты ─────────────────────────────────────────────────────────────────
-
-def _lang_code_from_label(label: Optional[str]) -> str:
-    """Из того, что хранится в answers (у тебя там часто label),
-    вытаскиваем ru/en/ro. По умолчанию ru."""
-    if not label:
-        return "ru"
-    l = label.lower()
-    if "ro" in l or "rom" in l:
-        return "ro"
-    if "en" in l or "eng" in l:
-        return "en"
-    return "ru"
-
-def _slugify(s: str) -> str:
-    s = re.sub(r"\s+", "-", s.strip().lower())
-    s = re.sub(r"[^a-z0-9\-]", "", s)
-    s = re.sub(r"-{2,}", "-", s).strip("-")
-    return s[:48] or "item"
-
-def _trim_label(label: str, maxlen: int = 40) -> str:
-    lab = " ".join(label.strip().split())
-    return (lab[:maxlen]).strip()
-
-
-async def _call_llm_list(prompt: str, *, timeout_s: float = 12.0) -> Optional[List[dict]]:
-    headers = {"Authorization": f"Bearer {DO_API_TOKEN}", "Content-Type": "application/json"}
-    payload = {"messages": [{"role": "user", "content": prompt}], "stream": False}
-    timeout = httpx.Timeout(connect=8.0, read=timeout_s, write=8.0, pool=10.0)
-
-    for attempt in range(2):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                r = await client.post(f"{DO_AGENT_URL}/api/v1/chat/completions", headers=headers, json=payload)
-                r.raise_for_status()
-                raw = r.json()["choices"][0]["message"]["content"].strip()
-            # снимаем ```json ... ```
-            if raw.startswith("```"):
-                raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
-                raw = re.sub(r"\n?```$", "", raw).strip()
-
-            data = json.loads(raw)
-            if isinstance(data, list):
-                return data
-            # иногда приезжает {"items":[...]}
-            if isinstance(data, dict) and isinstance(data.get("items"), list):
-                return data["items"]
-            return None
-        except Exception as e:
-            log.warning("values LLM try %s failed: %r", attempt+1, e)
-            await asyncio.sleep(0.7 * (attempt + 1))
-    return None
-
-def _normalize_items(raw: List[dict]) -> List[dict]:
-    out: List[dict] = []
-    seen: set[str] = set()
-    for it in raw:
-        lab = _trim_label(str(it.get("label", "")))
-        if not lab:
-            continue
-        val = (it.get("value") or _slugify(lab))
-        val = _slugify(val)
-        if val in seen:
-            # гарантируем уникальность
-            k, base = 2, val
-            while val in seen:
-                val = f"{base}-{k}"
-                k += 1
-        seen.add(val)
-        out.append({"value": val, "label": lab})
-        if len(out) == 8:
-            break
-    # минимум 7
-    return out if len(out) >= 7 else []
-
-# ── публичная корутина ───────────────────────────────────────────────────────
-
-# простой lock-пул на пользователя: не допускаем одновременных генераций
-_user_locks: dict[int, asyncio.Lock] = {}
-def _lock_for(user_id: int) -> asyncio.Lock:
-    if user_id not in _user_locks:
-        _user_locks[user_id] = asyncio.Lock()
-    return _user_locks[user_id]
-
-async def generate_values_options(user_id: int) -> None:
-    """
-    Генерирует 7–8 пунктов для мультивыбора 'summary_values' и сохраняет
-    их как персональные (source='ai') в answer_options.
-    На ошибках — только лог; UI покажет статику/предыдущее состояние.
-    """
-    async with _lock_for(user_id):
-        try:
-            # 1) контекст
-            ctx = get_user_context(user_id)
-            position_raw: str = (ctx.get("position") or "").strip()
-            if not position_raw:
-                log.info("values: skip, no position (user_id=%s)", user_id)
-                return
-
-            lang_code = _lang_code_from_label(ctx.get("lang"))
-            pos_norm  = normalize_position(position_raw) or position_raw  # на всякий
-
-            # 2) промпт
-            prompt = _build_values_prompt(pos_norm, lang_code)
-
-            # 3) запрос к LLM с усиленными таймаутами/ретраями
-            #    (если у тебя _call_llm_list уже имеет retries — просто передаём «подлиннее» read_timeout)
-            attempts = 3
-            raw_list: Optional[list] = None
-            for i in range(attempts):
-                try:
-                    raw_list = await _call_llm_list(prompt, timeout_s=60.0)
-                    break
-                except Exception as e:
-                    # экспоненциальный backoff + небольшой джиттер
-                    sleep_s = (1.0 * (2 ** i)) + random.uniform(0.0, 0.4)
-                    log.warning("values LLM try %s/%s failed: %s; sleep %.1fs",
-                                i+1, attempts, e, sleep_s)
-                    await asyncio.sleep(sleep_s)
-
-            if not raw_list:
-                log.warning("values: LLM returned nothing (user_id=%s, pos=%r)", user_id, pos_norm)
-                return
-
-            # 4) нормализация/валидация
-            try:
-                items = _normalize_items(raw_list)
-            except Exception as e:
-                log.warning("values: normalize error (user_id=%s): %s", user_id, e)
-                return
-
-            if not items or not (7 <= len(items) <= 8):
-                log.warning("values: empty/invalid after normalize (user_id=%s, pos=%r)", user_id, pos_norm)
-                return
-
-            # 5) только теперь — запись в БД (замена персональных AI-опций)
-            inserted = await asyncio.to_thread(
-                replace_user_ai_options,
-                user_id,
-                "summary_values",
-                items,
-                lang=lang_code,
-                position=pos_norm,
-            )
-            log.info("user_id=%s: values inserted=%s lang=%s pos=%s",
-                     user_id, inserted, lang_code, pos_norm)
-
-        except Exception as e:
-            log.exception("values generation failed (user_id=%s): %r", user_id, e)
-
+@alert_on_exception(ttl=1)
 async def chain_generate_after_position(user_id: int):
     try:
-        await generate_tasks_options(user_id)          # summary_tasks
-        await asyncio.sleep(3)                       # крошечная пауза, чтоб разгрузить агент
-        await generate_values_options(user_id)         # summary_values
+        task_labels  = await generate_tasks_options(user_id)
+        await asyncio.sleep(2.0)  # небольшой «антифлуд» и визуально приятнее
+        value_labels = await generate_values_options(user_id)
+
+        username, full_name, _ = get_user_identity(user_id)
+        ctx = get_user_context(user_id)
+        lang_code = _map_lang_code(ctx.get("lang"))
+        pos_norm  = normalize_position(ctx.get("position") or "") or (ctx.get("position") or "")
+
+        parts = [
+            f"Username: @{username or '-'}",
+            f"Full name: {full_name or '-'}",
+            "",
+            f"Position: {pos_norm} - {lang_code}",
+        ]
+        if task_labels:
+            parts += ["", "Tasks:", "- " + "\n- ".join(task_labels)]
+        if value_labels:
+            parts += ["", "Values:", "- " + "\n- ".join(value_labels)]
+
+        txt = "\n".join(parts)
+        ok = await alert.send(txt, level="INFO")
+        if not ok:
+            log.warning("alert: combined send failed (user_id=%s)", user_id)
+
     except Exception as e:
         log.exception("chain_generate_after_position: %s", e)
