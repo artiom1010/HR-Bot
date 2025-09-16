@@ -62,11 +62,9 @@ def clear_user_answers(session: Session, user_id: int) -> int:
 
 def clear_user_drafts(session: Session, user_id: int) -> None:
     """Полная очистка пользовательских черновиков (Draft) + опционально хвостов заказов."""
-    # 1) реально удаляем drafts
     session.query(Draft).filter(Draft.user_id == user_id)\
         .delete(synchronize_session=False)
 
-    # 2) опционально чистим незавершённые заказы и processed_data (как было)
     draft_orders = session.query(Order).filter(
         Order.user_id == user_id,
         Order.paynet_status.in_([PaynetStatus.created, PaynetStatus.created])
@@ -77,6 +75,8 @@ def clear_user_drafts(session: Session, user_id: int) -> None:
         session.delete(o)
     session.commit()
 
+
+
 # ==============
 # DRAFTS HELPER
 # ==============
@@ -85,7 +85,6 @@ def drafts_count(s, user_id: int, parent_key: str) -> int:
         Draft.user_id == user_id,
         Draft.parent_key == parent_key
     )
-    # В summary не считаем технические флаги ожидания
     if parent_key == "summary":
         q = q.where(~Draft.step_key.like("%__await"))
     return s.execute(q).scalar_one()
@@ -103,7 +102,6 @@ def get_drafts_values_ordered(s, user_id: int, parent_key: str) -> list[str]:
     ).scalars().all()
     out: list[str] = []
     for r in rows:
-        # пропускаем тех.флаги __await
         if r.step_key.endswith("__await"):
             continue
         if r.value and r.value.strip():
@@ -115,7 +113,7 @@ def drafts_completed_count(s, user_id: int, parent_key: str) -> int:
         select(func.count()).select_from(Draft).where(
             Draft.user_id == user_id,
             Draft.parent_key == parent_key,
-            ~Draft.step_key.like("%__await")        # ← НОВОЕ
+            ~Draft.step_key.like("%__await")
         )
     ).scalar_one()
 
@@ -151,11 +149,11 @@ def get_drafts_by_parent(s, user_id: int, parent_key: str):
     ).scalars().all()
 
 
+
 # ==============
 # PERSONAL WAIT
 # ==============
 def set_personal_wait(s, user_id: int, step_key: str):
-    # используем drafts как KV-хранилище: parent_key='summary', step_key='<subkey>__await'
     replace_draft(s, user_id, parent_key="summary", step_key=f"{step_key}__await", value="1")
 
 
@@ -180,11 +178,10 @@ def pop_personal_wait(s: Session, user_id: int) -> str | None:
 
 
 # ==============
-# FREE TEXT WAIT (универсально для любых ключей)
+# FREE TEXT WAIT
 # ==============
 def set_free_wait(s: Session, user_id: int, qkey: str):
     """Ставим флаг: ждём свободный текст для конкретного ключа (не только summary_*)."""
-    # используем drafts как KV-хранилище: parent_key='__free__', step_key=<qkey>
     replace_draft(s, user_id, parent_key="__free__", step_key=qkey, value="1")
 
 
@@ -192,7 +189,18 @@ def pop_free_wait(s: Session, user_id: int) -> str | None:
     """Снимаем и возвращаем ключ, для которого ждали свободный ввод."""
     rows = get_drafts_by_parent(s, user_id, "__free__")
     for r in rows:
-        step = r.step_key          # (НОВОЕ) сохраняем до удаления
+        step = r.step_key
         delete_draft_by_key(s, user_id, "__free__", step)
         return step
     return None
+
+
+def get_draft_value(s: Session, user_id: int, parent_key: str, step_key: str) -> str | None:
+    row = s.execute(
+        select(Draft.value)
+        .where(Draft.user_id == user_id,
+               Draft.parent_key == parent_key,
+               Draft.step_key == step_key)
+        .order_by(Draft.id.desc())
+    ).scalars().first()
+    return row
