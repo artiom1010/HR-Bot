@@ -52,14 +52,14 @@ def register_payment(order_id: int):
         "SignVersion": "v01",
         "Customer": {
             "Code":"sary.artema@mail.ru",
-            "Name":"Artiom",
-            "NameFirst":"Sary",
+            "Name":"",
+            "NameFirst":"",
             "NameLast":"Name last ",
-            "email":"sary.artema@mail.ru",
+            "email":"",
             "Country":"Moldova",
             "City": "Chisinau",
             "Address":"www.paynet.md",
-            "PhoneNumber":"67309067"
+            "PhoneNumber":""
             },
         "Payer": "null",
         "Currency": CURRENCY,
