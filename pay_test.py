@@ -54,7 +54,7 @@ def register_payment(order_id: int):
             "Code":"sary.artema@mail.ru",
             "Name":"",
             "NameFirst":"",
-            "NameLast":"Name last ",
+            "NameLast":"",
             "email":"",
             "Country":"Moldova",
             "City": "Chisinau",
