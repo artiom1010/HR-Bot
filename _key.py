@@ -49,6 +49,14 @@ def get_dev_payment_keyboard(order_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def exp_finish_kb(next_index: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить ещё опыт", callback_data=f"exp:add:{next_index}")],
+            [InlineKeyboardButton(text="⏭ Перейти дальше",  callback_data="exp:next")]
+        ]
+    )
+
 
 # ==============
 # FLOW KEYBOARDS

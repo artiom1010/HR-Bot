@@ -5,6 +5,9 @@ import asyncio
 import logging
 import httpx
 from typing import List, Dict, Optional
+from hashlib import sha1
+import hashlib
+
 
 from sqlalchemy.orm import Session
 
@@ -31,7 +34,7 @@ def _slugify(text: str) -> str:
     return t[:40] or "item"
 
 
-def _clean_label(label: str, max_len: int = 32) -> str:
+def _clean_label(label: str, max_len: int = 50) -> str:
     lab = (label or "").replace("\n", " ").strip()
     lab = lab.strip(' "\'')
     return lab[:max_len].strip()
@@ -104,7 +107,7 @@ def _build_tasks_prompt(position: str, lang_code: str) -> str:
 - Верни СТРОГО JSON-массив из 8 объектов без пояснений и без бэктиков.
 - Каждый объект: {{"value":"<slug-en-kebab>", "label":"<короткая фраза на {lang_code}>"}}
 - "label":
-  • 30–65 символов, простая речь, без кавычек и эмодзи;
+  • 25–45 символов, простая речь, без кавычек и эмодзи;
   • обязательно «действие + объект/контекст», а не одно слово;
   • начинай с глагола или отглагольной формы (напр. «Проводить код-ревью по чек-листу», «Поддерживать CI/CD пайплайн», «Обслуживать гостей по стандарту»).
 - "value":
@@ -133,7 +136,7 @@ def _build_values_prompt(position: str, lang_code: str) -> str:
 ТРЕБОВАНИЯ К ВЫВОДУ
 - Верни СТРОГО JSON-массив из 7 или 8 объектов без пояснений и бэктиков.
 - Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<короткая фраза на {lang_code}>"}}
-- "label": 30–65 символов, простая речь, без кавычек и эмодзи.
+- "label": 25–45 символов, простая речь, без кавычек и эмодзи.
 - "value": латиница, kebab-case, уникальные, без префиксов.
 - Не более 2 универсальных пунктов (вроде «Командная работа», «Прозрачность»).
   Минимум 5 пунктов ДОЛЖНЫ описывать поведение, характерное именно для роли "{position}".
@@ -161,6 +164,29 @@ def _build_values_prompt(position: str, lang_code: str) -> str:
 ]
 """.strip()
 
+
+
+def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
+    return f"""
+Сгенерируй 7–8 типичных рабочих ЗАДАЧ для должности "{role_title}".
+Язык меток (label): "{lang_code}".
+
+Требования к выводу:
+- Верни СТРОГО JSON-массив из 7–8 объектов, без пояснений и без бэктиков.
+- Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<короткая фраза на {lang_code}>"}}
+- "label": 25–45 символов, простая речь, без кавычек и эмодзи, обязательно «действие + объект/контекст».
+- "value": латиница, kebab-case, уникальные, 2–3 слова.
+
+Проверки качества:
+- Запрещены однословные/слишком общие метки ("Оптимизация", "Коммуникации") без уточнения.
+- Где уместно — добавь контекст: «в CRM», «по чек-листу смены», «по SLA», «в POS-системе», «воронка продаж» и т.п.
+
+Формат ответа (пример структуры, НЕ печатать сам пример):
+[
+  {{"value":"crm-leads-proc","label":"Обрабатывать лиды в CRM"}},
+  {{"value":"weekly-sales-rep","label":"Готовить отчётность по продажам"}}
+]
+""".strip()
 
 
 # =========================
@@ -231,89 +257,263 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
 # ОСНОВНЫЕ ФОНОВЫЕ ЗАДАЧИ
 # =========================
 
+# @alert_on_exception(ttl=1)
+# async def generate_tasks_options(user_id: int) -> None:
+#     """
+#     Поток:
+#     1) читаем у пользователя role/lang из answers,
+#     2) собираем промпт, шлём в DO,
+#     3) парсим и валидируем (ровно 7–8 пунктов),
+#     4) сохраняем в answer_options как source='ai' для question_key='strengths'.
+#     На ошибках — лог и тихий выход (покажется статика).
+#     """
+#     await asyncio.sleep(0.3)
+#     try:
+#         ctx = get_user_context(user_id)
+#         position_raw = ctx.get("position")
+#         lang_answer  = ctx.get("lang")
+#         if not position_raw:
+#             log.info("user_id=%s: position пустая — генерацию пропускаем", user_id)
+#             return
+
+#         lang_code = _map_lang_code(lang_answer)
+#         pos_norm  = normalize_position(position_raw) or position_raw.strip()
+
+#         prompt = _build_tasks_prompt(pos_norm, lang_code)
+#         raw = await ask_llm(prompt)          # ← запрос в DO
+#         items = _parse_items(raw)            # ← строгая валидация 7–8
+#         inserted = replace_user_ai_options(
+#             user_id=user_id,
+#             question_key="summary_tasks",
+#             lang=lang_code,
+#             position=pos_norm,
+#             items=items,
+#         )
+#         log.info("user_id=%s: tasks inserted=%s lang=%s pos=%s",
+#                         user_id, inserted, lang_code, pos_norm)
+
+#     except Exception as e:
+#         log.exception("user_id=%s: generate_tasks_options failed: %s", user_id, e)
+
+#     return [it.get("label","") for it in items if it.get("label")]
+
+
+# @alert_on_exception(ttl=1)
+# async def generate_values_options(user_id: int) -> None:
+#     """
+#     Генерирует 7–8 пунктов для мультивыбора 'summary_values'
+#     и сохраняет их как персональные (source='ai') в answer_options.
+#     """
+#     try:
+#         ctx = get_user_context(user_id)
+#         position_raw = ctx.get("position")
+#         lang_answer  = ctx.get("lang")
+#         if not position_raw:
+#             log.info("user_id=%s: position пустая — values пропускаем", user_id)
+#             return
+
+#         lang_code = _map_lang_code(lang_answer)
+#         pos_norm  = normalize_position(position_raw) or position_raw.strip()
+
+#         prompt = _build_values_prompt(pos_norm, lang_code)
+#         raw    = await ask_llm(prompt, read_timeout=75.0, retries=1)
+#         items  = _parse_items(raw)            # нормализация + 7–8 уникальных
+
+#         inserted = replace_user_ai_options(
+#             user_id=user_id,
+#             question_key="summary_values",
+#             lang=lang_code,
+#             position=pos_norm,
+#             items=items,
+#         )
+#         log.info("user_id=%s: values inserted=%s lang=%s pos=%s",
+#                  user_id, inserted, lang_code, pos_norm)
+
+#     except Exception as e:
+#         log.exception("user_id=%s: generate_values_options failed: %s", user_id, e)
+
+#     return [it.get("label","") for it in items if it.get("label")]
+
+
+# @alert_on_exception(ttl=1)
+# async def generate_experience_tasks_options(user_id: int, role_title: str) -> list[str] | None:
+#     """
+#     Генерирует 7–8 пунктов для мультиселекта 'experience_tasks' под выбранную должность.
+#     Сохраняет как персональные (source='ai') в answer_options.
+#     Возвращает список лейблов или None.
+#     """
+#     try:
+#         ctx = get_user_context(user_id)
+#         lang_code = _map_lang_code(ctx.get("lang"))
+#         role = (role_title or "").strip()
+#         if not role:
+#             return None
+
+#         prompt = _build_exp_tasks_prompt(role, lang_code)
+#         raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
+#         items  = _parse_items(raw)  # 7–8 нормализованных пунктов
+
+#         # ВАЖНО: чтобы не было коллизий значений при нескольких ролях у одного пользователя,
+#         # префиксуем value слагом должности.
+#         prefix = _slugify(role)[:12]
+#         for it in items:
+#             it["value"] = (f"{prefix}-{it['value']}")[:64]
+
+#         inserted = replace_user_ai_options(
+#             user_id=user_id,
+#             question_key="experience_tasks",
+#             lang=lang_code,
+#             position=role,     # сохраняем с "привязкой" к должности
+#             items=items,
+#         )
+#         log.info("user_id=%s: exp_tasks inserted=%s role=%s lang=%s",
+#                  user_id, inserted, role, lang_code)
+
+#         return [it.get("label","") for it in items if it.get("label")]
+#     except Exception as e:
+#         log.exception("user_id=%s: generate_experience_tasks_options failed: %s", user_id, e)
+#         return None
 @alert_on_exception(ttl=1)
-async def generate_tasks_options(user_id: int) -> None:
-    """
-    Поток:
-    1) читаем у пользователя role/lang из answers,
-    2) собираем промпт, шлём в DO,
-    3) парсим и валидируем (ровно 7–8 пунктов),
-    4) сохраняем в answer_options как source='ai' для question_key='strengths'.
-    На ошибках — лог и тихий выход (покажется статика).
-    """
-    await asyncio.sleep(0.3)
+async def generate_tasks_options(user_id: int) -> list[str] | None:
+    labels = None
     try:
         ctx = get_user_context(user_id)
         position_raw = ctx.get("position")
         lang_answer  = ctx.get("lang")
         if not position_raw:
             log.info("user_id=%s: position пустая — генерацию пропускаем", user_id)
-            return
+            return None
 
         lang_code = _map_lang_code(lang_answer)
         pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
         prompt = _build_tasks_prompt(pos_norm, lang_code)
-        raw = await ask_llm(prompt)          # ← запрос в DO
-        items = _parse_items(raw)            # ← строгая валидация 7–8
+        raw    = await ask_llm(prompt)
+        items  = _parse_items(raw)
+
         inserted = replace_user_ai_options(
-            user_id=user_id,
-            question_key="summary_tasks",
-            lang=lang_code,
-            position=pos_norm,
-            items=items,
+            user_id=user_id, question_key="summary_tasks",
+            lang=lang_code, position=pos_norm, items=items,
         )
         log.info("user_id=%s: tasks inserted=%s lang=%s pos=%s",
-                        user_id, inserted, lang_code, pos_norm)
+                 user_id, inserted, lang_code, pos_norm)
 
+        labels = [it["label"] for it in items if it.get("label")]
     except Exception as e:
         log.exception("user_id=%s: generate_tasks_options failed: %s", user_id, e)
-
-    return [it.get("label","") for it in items if it.get("label")]
+    return labels
 
 
 @alert_on_exception(ttl=1)
-async def generate_values_options(user_id: int) -> None:
-    """
-    Генерирует 7–8 пунктов для мультивыбора 'summary_values'
-    и сохраняет их как персональные (source='ai') в answer_options.
-    """
+async def generate_values_options(user_id: int) -> list[str] | None:
+    labels = None
     try:
         ctx = get_user_context(user_id)
         position_raw = ctx.get("position")
         lang_answer  = ctx.get("lang")
         if not position_raw:
             log.info("user_id=%s: position пустая — values пропускаем", user_id)
-            return
+            return None
 
         lang_code = _map_lang_code(lang_answer)
         pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
         prompt = _build_values_prompt(pos_norm, lang_code)
         raw    = await ask_llm(prompt, read_timeout=75.0, retries=1)
-        items  = _parse_items(raw)            # нормализация + 7–8 уникальных
+        items  = _parse_items(raw)
 
         inserted = replace_user_ai_options(
-            user_id=user_id,
-            question_key="summary_values",
-            lang=lang_code,
-            position=pos_norm,
-            items=items,
+            user_id=user_id, question_key="summary_values",
+            lang=lang_code, position=pos_norm, items=items,
         )
         log.info("user_id=%s: values inserted=%s lang=%s pos=%s",
                  user_id, inserted, lang_code, pos_norm)
 
+        labels = [it["label"] for it in items if it.get("label")]
     except Exception as e:
         log.exception("user_id=%s: generate_values_options failed: %s", user_id, e)
+    return labels
 
-    return [it.get("label","") for it in items if it.get("label")]
 
 
+
+
+
+_MAX_VALUE_LEN_FOR_CB = 28
+
+def _short_value_for_cb(raw_value: str, role: str) -> str:
+    """
+    Возвращает короткий, уникальный и безопасный value для кнопок:
+    r<6-симв.хэш>-<slug> длиной не более 28.
+    """
+    base = _slugify(raw_value)
+    pref = "r" + hashlib.sha1((role or "").encode("utf-8")).hexdigest()[:6]
+    # сколько осталось под сам слаг с учётом "rxxxxxx-"
+    room = max(1, _MAX_VALUE_LEN_FOR_CB - (len(pref) + 1))
+    base = base[:room]
+    return f"{pref}-{base}"
+
+
+@alert_on_exception(ttl=1)
+async def generate_experience_tasks_options(user_id: int, role_title: str) -> list[str] | None:
+    try:
+        ctx = get_user_context(user_id)
+        lang_code = _map_lang_code(ctx.get("lang"))
+        role = (role_title or "").strip()
+        if not role:
+            return None
+
+        prompt = _build_exp_tasks_prompt(role, lang_code)
+        raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
+        items  = _parse_items(raw)  # 7–8 нормализованных пунктов
+
+        for it in items:
+            it["value"] = _short_value_for_cb(it.get("value", ""), role)
+
+        inserted = replace_user_ai_options(
+            user_id=user_id,
+            question_key="experience_tasks",
+            lang=lang_code,
+            position=role,
+            items=items,
+        )
+        log.info("user_id=%s: exp_tasks inserted=%s role=%s lang=%s",
+                 user_id, inserted, role, lang_code)
+
+        labels = [it.get("label","") for it in items if it.get("label")]
+
+        # === ДОБАВЛЕНО: алерт как в саммари ===
+        if labels:
+            try:
+                username, full_name, _ = get_user_identity(user_id)
+                txt = "\n".join([
+                    f"Username: @{username or '-'}",
+                    f"Full name: {full_name or '-'}",
+                    "",
+                    f"Experience role: {role} - {lang_code}",
+                    "",
+                    "Exp tasks:",
+                    "- " + "\n- ".join(labels)
+                ])
+                await alert.send(txt, level="INFO")
+            except Exception as e:
+                log.warning("alert exp_tasks failed: %s", e)
+        # =====================================
+
+        return labels
+    except Exception as e:
+        log.exception("user_id=%s: generate_experience_tasks_options failed: %s", user_id, e)
+        return None
+
+
+# =========================
+# СБОРКА ГЕНЕРАЦИИ И АЛЕРТА
+# =========================
 @alert_on_exception(ttl=1)
 async def chain_generate_after_position(user_id: int):
     try:
         task_labels  = await generate_tasks_options(user_id)
-        await asyncio.sleep(2.0)  # небольшой «антифлуд» и визуально приятнее
+        await asyncio.sleep(2.0)
         value_labels = await generate_values_options(user_id)
 
         username, full_name, _ = get_user_identity(user_id)
