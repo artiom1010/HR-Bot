@@ -49,6 +49,8 @@ def get_dev_payment_keyboard(order_id: int) -> InlineKeyboardMarkup:
     )
 
 
+# ============== EXPERIENCE KEYBOARDS
+
 def exp_finish_kb(next_index: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -57,6 +59,30 @@ def exp_finish_kb(next_index: int) -> InlineKeyboardMarkup:
         ]
     )
 
+# ============== EDUCATION KEYBOARDS
+
+def edu_start_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🎓 Добавить образование/курсы", callback_data="edu:start:1")
+    kb.button(text="⏭ Пропустить",                 callback_data="edu:next")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def edu_finish_kb(next_index: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить ещё одно образование", callback_data=f"edu:add:{next_index}")
+    kb.button(text="⏭ Далее",                          callback_data="edu:next")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def courses_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить курс/сертификат", callback_data="flow:ask:courses")
+    kb.button(text="⏭ Пропустить",               callback_data="flow:skip:courses")
+    kb.adjust(1)
+    return kb.as_markup()
 
 # ==============
 # FLOW KEYBOARDS
