@@ -38,7 +38,10 @@ from _key import (
     single_select_kb, 
     build_multiselect_kb,
     continue_kb,
-    exp_finish_kb)
+    exp_finish_kb,
+    edu_start_kb, 
+    edu_finish_kb,
+    courses_kb)
 
 from _utils import (
     logger,
@@ -49,7 +52,11 @@ from _utils import (
     SUMMARY_STEPS,
     PERSONAL_MESSAGE,
     EXPERIENCE_STEPS,
-    ACHIEVEMENTS_FALLBACK_EXAMPLES)
+    ACHIEVEMENTS_FALLBACK_EXAMPLES,
+    EDUCATION_STEPS, 
+    EDUCATION_INTRO,
+    COURSES_INTRO,
+    COURSES_ASK_TEXT)
 
 from handlers.ms_repo import (
     get_selected_set, 
@@ -116,7 +123,21 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
         # 3) стартуем первый подпроцесс опыта
         await ask_next_experience_step(chat_id, user_id, exp_index=1)
         return
-
+    
+    # ▶ Если это education — запускаем мини-мастер образования
+    if qkey == "education" and user_id:
+        await bot.send_message(chat_id, EDUCATION_INTRO, reply_markup=edu_start_kb())
+        
+        def _mark_done():
+            with Session(engine) as s:
+                save_answer(s, user_id, "education", "")
+        await asyncio.to_thread(_mark_done)
+        return
+    
+    # ▶ Если это courses — просто текст с кнопками
+    if qkey == "courses" and user_id:
+        await bot.send_message(chat_id, COURSES_INTRO, reply_markup=courses_kb())
+        return
     
     pairs = await asyncio.to_thread(get_options, qkey, user_id, None, None)
     
@@ -298,6 +319,15 @@ async def handle_answer(message: Message):
                     add_draft(s, user.id, "summary", free_qkey, text)
                     s.commit()
                     return user.id, "summary_step_saved", None, free_qkey
+                
+                # user.py — ВНУТРИ handle_answer(), в ветке free_qkey:
+                if free_qkey.startswith("edu") and "::" in free_qkey:
+                    parent, step = free_qkey.split("::", 1)
+                    parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
+                    human = ", ".join(parts) if parts else text
+                    replace_draft(s, user.id, parent_key=parent, step_key=step, value=human)
+                    s.commit()
+                    return user.id, f"__edu_step_saved__:{parent}", None, step
 
                 save_answer(s, user.id, free_qkey, text)
                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
@@ -359,6 +389,12 @@ async def handle_answer(message: Message):
         parent = next_key.split(":", 1)[1]
         exp_index = int(parent.replace("exp", "") or "1")
         await ask_next_experience_step(message.chat.id, user_id, exp_index=exp_index)
+        return
+    
+    if isinstance(next_key, str) and next_key.startswith("__edu_step_saved__"):
+        parent = next_key.split(":", 1)[1]      # edu1 / edu2 / ...
+        edu_index = int(parent.replace("edu", "") or "1")
+        await ask_next_education_step(message.chat.id, user_id, edu_index=edu_index)
         return
 
     if error == "done":
@@ -433,7 +469,10 @@ async def handle_flow(callback: CallbackQuery):
             await callback.message.answer("Сначала /start.")
             return
 
-        await callback.message.answer(PERSONAL_MESSAGE)
+        if key == "courses":
+            await callback.message.answer(COURSES_ASK_TEXT)
+        else:
+            await callback.message.answer(PERSONAL_MESSAGE)
         return
 
     if action == "skip":
@@ -584,7 +623,6 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
         await bot.send_message(chat_id, prompt)
         return
 
-
     if step_key == "experience_tasks":
         def _role():
             with Session(engine) as s:
@@ -707,6 +745,106 @@ async def handle_exp_nav(callback: CallbackQuery):
             await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
             await create_order_and_run_ai(callback.message, user_id)
 
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Мастер education
+# ──────────────────────────────────────────────────────────────────────────────
+EDUCATION_ORDER   = [k for k, _ in EDUCATION_STEPS]
+EDUCATION_PROMPTS = dict(EDUCATION_STEPS)
+
+async def ask_next_education_step(chat_id: int, user_id: int, edu_index: int = 1):
+    parent = f"edu{edu_index}"
+
+    def _count():
+        with Session(engine) as s:
+            return drafts_completed_count(s, user_id, parent)
+    idx = await asyncio.to_thread(_count)
+
+    if idx >= len(EDUCATION_ORDER):
+        await finalize_education_and_choice(chat_id, user_id, edu_index)
+        return
+
+    step_key = EDUCATION_ORDER[idx]
+    prompt   = EDUCATION_PROMPTS[step_key]
+
+    def _mark():
+        with Session(engine) as s:
+            set_free_wait(s, user_id, f"{parent}::{step_key}")
+            s.commit()
+    await asyncio.to_thread(_mark)
+    await bot.send_message(chat_id, prompt)
+
+
+async def finalize_education_and_choice(chat_id: int, user_id: int, edu_index: int):
+    parent = f"edu{edu_index}"
+
+    def _collect_and_save():
+        with Session(engine) as s:
+            rows = get_drafts_values_ordered(s, user_id, parent)
+            # ожидаем три подшагa: institution, specialty, period
+            combined = " // ".join(rows) if rows else ""
+            save_answer(s, user_id, f"education_{edu_index}", combined)
+            clear_parent_drafts(s, user_id, parent)
+    await asyncio.to_thread(_collect_and_save)
+
+    if edu_index == 1:
+        done = "👍 Отлично! У нас уже есть 1 образование."
+    else:
+        done = f"👍 Отлично! У нас уже есть {edu_index} образования."
+    await bot.send_message(chat_id, done, reply_markup=edu_finish_kb(edu_index + 1))
+
+
+@router.callback_query(F.data.startswith("edu:"))
+async def handle_edu_nav(callback: CallbackQuery):
+    await callback.answer()
+    parts = callback.data.split(":")
+    action = parts[1]
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    tg_id = callback.from_user.id
+    def _get_user():
+        with Session(engine) as s:
+            u = s.query(User).filter_by(telegram_id=tg_id).first()
+            return (u.id if u else None)
+    user_id = await asyncio.to_thread(_get_user)
+    if not user_id:
+        await callback.message.answer("Сначала /start, пожалуйста.")
+        return
+
+    if action == "start":
+        edu_index = int(parts[2]) if len(parts) > 2 else 1
+        def _clr():
+            with Session(engine) as s:
+                clear_parent_drafts(s, user_id, f"edu{edu_index}")
+                s.commit()
+        await asyncio.to_thread(_clr)
+        await ask_next_education_step(callback.message.chat.id, user_id, edu_index=edu_index)
+        return
+
+    if action == "add":
+        edu_index = int(parts[2])
+        def _clr():
+            with Session(engine) as s:
+                clear_parent_drafts(s, user_id, f"edu{edu_index}")
+                s.commit()
+        await asyncio.to_thread(_clr)
+        await ask_next_education_step(callback.message.chat.id, user_id, edu_index=edu_index)
+        return
+
+    if action == "next":
+        def _next():
+            with Session(engine) as s:
+                return get_first_unanswered(s, user_id, QUESTION_FLOW)
+        next_key = await asyncio.to_thread(_next)
+        if next_key:
+            await send_next_with_intro(callback.message.chat.id, next_key, user_id)
+        else:
+            await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ... (1-2 мин)")
+            await create_order_and_run_ai(callback.message, user_id)
 
 
 
