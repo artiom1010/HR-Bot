@@ -390,7 +390,8 @@ def _short_value_for_cb(raw_value: str, role: str) -> str:
 
 
 @alert_on_exception(ttl=1)
-async def generate_experience_tasks_options(user_id: int, role_title: str) -> list[str] | None:
+# async def generate_experience_tasks_options(user_id: int, role_title: str) -> list[str] | None:
+async def generate_experience_tasks_options(user_id: int, role_title: str, *, notify: bool = False) -> list[str] | None:
     try:
         ctx = get_user_context(user_id)
         lang_code = _map_lang_code(ctx.get("lang"))
@@ -418,7 +419,7 @@ async def generate_experience_tasks_options(user_id: int, role_title: str) -> li
         labels = [it.get("label","") for it in items if it.get("label")]
 
         # === ДОБАВЛЕНО: алерт как в саммари ===
-        if labels:
+        if notify and labels:
             try:
                 username, full_name, _ = get_user_identity(user_id)
                 txt = "\n".join([
@@ -493,7 +494,9 @@ def _coerce_bullets_to_array(text: str) -> list[str]:
     return picked[:3]
 
 @alert_on_exception(ttl=1)
-async def generate_experience_achievements_examples(user_id: int, role_title: str) -> list[str] | None:
+# async def generate_experience_achievements_examples(user_id: int, role_title: str) -> list[str] | None:
+async def generate_experience_achievements_examples(user_id: int, role_title: str, *, notify: bool = False) -> list[str] | None:
+
     """
     Генерирует 3 примера достижений для указанной роли и сохраняет их как options
     под ключом question_key="experience_achievements" (по аналогии с experience_tasks).
@@ -523,7 +526,7 @@ async def generate_experience_achievements_examples(user_id: int, role_title: st
 
         labels = [it.get("label","") for it in items if it.get("label")]
         # лёгкий инфо-алёрт (как в других местах)
-        if labels:
+        if notify and labels:
             try:
                 username, full_name, _ = get_user_identity(user_id)
                 txt = "\n".join([
@@ -577,3 +580,42 @@ async def chain_generate_after_position(user_id: int):
 
     except Exception as e:
         log.exception("chain_generate_after_position: %s", e)
+
+
+@alert_on_exception(ttl=1)
+async def generate_experience_bundle(user_id: int, role_title: str):
+    """
+    Параллельно генерим exp tasks + achievements для выбранной роли,
+    сохраняем options и отправляем ОДИН общий алерт.
+    """
+    role = (role_title or "").strip()
+    if not role:
+        return
+
+    # параллельная генерация без собственных алертов
+    tasks_labels, ach_labels = await asyncio.gather(
+        generate_experience_tasks_options(user_id, role, notify=False),
+        generate_experience_achievements_examples(user_id, role, notify=False),
+    )
+
+    # если совсем пусто — молчим
+    if not (tasks_labels or ach_labels):
+        return
+
+    # собираем одно сообщение
+    username, full_name, _ = get_user_identity(user_id)
+    ctx = get_user_context(user_id)
+    lang_code = _map_lang_code(ctx.get("lang"))
+
+    parts = [
+        f"Username: @{username or '-'}",
+        f"Full name: {full_name or '-'}",
+        "",
+        f"Experience role: {role} - {lang_code}",
+    ]
+    if tasks_labels:
+        parts += ["", "Experience tasks:", "- " + "\n- ".join(tasks_labels)]
+    if ach_labels:
+        parts += ["", "Achievements:", "- " + "\n- ".join(ach_labels)]
+
+    await alert.send("\n".join(parts), level="INFO")

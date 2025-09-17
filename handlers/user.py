@@ -28,7 +28,8 @@ from handlers.options_repo import get_options, get_label_for, normalize_position
 from handlers.ai_tasks import (
     chain_generate_after_position,
     generate_experience_tasks_options,
-    generate_experience_achievements_examples)
+    generate_experience_achievements_examples,
+    generate_experience_bundle)
 
 from _database import engine, User
 
@@ -224,7 +225,8 @@ async def handle_choice(callback: CallbackQuery):
         parent = next_key.split(":", 1)[1]          # exp1 / exp2 / ...
         exp_index = int(parent.replace("exp", "") or "1")
         # 🔔 ХУК: генерация задач для опыта работы
-        asyncio.create_task(generate_experience_tasks_options(user_id, echo_label))
+        # asyncio.create_task(generate_experience_tasks_options(user_id, echo_label))
+        asyncio.create_task(generate_experience_bundle(user_id, echo_label))
         asyncio.create_task(generate_experience_achievements_examples(user_id, echo_label))
         await ask_next_experience_step(callback.message.chat.id, user_id, exp_index=exp_index)
         return
@@ -379,7 +381,8 @@ async def handle_answer(message: Message):
         exp_index = int(parent.replace("exp", "") or "1")
         title_text = just_answered_key or ""
         # 🔔 ХУК: генерация задач для опыта работы
-        asyncio.create_task(generate_experience_tasks_options(user_id, title_text))
+        # asyncio.create_task(generate_experience_tasks_options(user_id, title_text))
+        asyncio.create_task(generate_experience_bundle(user_id, title_text))
         asyncio.create_task(generate_experience_achievements_examples(user_id, title_text))
         await ask_next_experience_step(message.chat.id, user_id, exp_index=exp_index)
         return
