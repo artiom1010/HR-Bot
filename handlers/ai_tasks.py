@@ -1,4 +1,5 @@
 # handlers/ai_tasks.py
+import os
 import re
 import json
 import asyncio
@@ -72,6 +73,28 @@ def _parse_items(raw_text: str) -> List[Dict[str, str]]:
             continue
         cleaned.append({"value": val, "label": lab})
     return _ensure_unique_7_8(cleaned)
+
+
+def _parse_examples_to_items(raw_text: str) -> list[dict[str, str]]:
+    try:
+        arr = _extract_json_array(raw_text)
+    except Exception:
+        arr = _coerce_bullets_to_array(raw_text)
+
+    cleaned = []
+    for s in arr:
+        if not isinstance(s, str):
+            continue
+        lab = _clean_label(s, max_len=200)
+        if not lab:
+            continue
+        val = _slugify(lab)[:40] or "item"
+        cleaned.append({"value": val, "label": lab})
+        if len(cleaned) == 3:
+            break
+    if not cleaned:
+        raise ValueError("Empty achievements list")
+    return cleaned
 
 
 def _map_lang_code(lang_answer: Optional[str]) -> str:
@@ -189,6 +212,34 @@ def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
 """.strip()
 
 
+def _build_exp_achievements_prompt(role_title: str, lang_code: str) -> str:
+    return f"""
+Сгенерируй РЕЛЕВАНТНЫЕ для должности "{role_title}" примеры достижений в резюме.
+Язык: "{lang_code}".
+
+Формат: ВЕРНИ СТРОГО JSON-массив ИЗ 3 СТРОК без пояснений и без бэктиков.
+Каждая строка — одно достижение по формуле:
+действие + метрика + период + за счёт + эффект.
+
+Требования к стилю:
+- 90–150 символов на строку.
+- Конкретные числа/проценты/сроки (если уместно).
+- Без эмодзи, без кавычек, без Markdown.
+- Фразы должны чувствоваться "про {role_title}" (лексика/контекст роли).
+
+Важно:
+- Возврати ТОЛЬКО JSON-массив строк без какого-либо текста до/после.
+- Запрещены буллеты, нумерация, комментарии, пояснения, кавычки-снаружи массива и лишние запятые.
+- ЕСЛИ не можешь — всё равно верни массив из ТРЁХ корректных строк.
+
+Примеры структуры (НЕ печатать их, это не часть ответа):
+[
+  "Снизил расходы на 22% за 9 мес. за счёт новых условий — экономия ~$5000/мес.",
+  "Ускорил выдачу на 30% за 6 мес. автоматизацией — просрочки −45%.",
+  "Довёл NPS до 4.8/5 за квартал обучением — повторные покупки +15%."
+]
+""".strip()
+
 # =========================
 # ЗАПРОС К ТВОЕМУ DO-АГЕНТУ
 # =========================
@@ -257,122 +308,6 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
 # ОСНОВНЫЕ ФОНОВЫЕ ЗАДАЧИ
 # =========================
 
-# @alert_on_exception(ttl=1)
-# async def generate_tasks_options(user_id: int) -> None:
-#     """
-#     Поток:
-#     1) читаем у пользователя role/lang из answers,
-#     2) собираем промпт, шлём в DO,
-#     3) парсим и валидируем (ровно 7–8 пунктов),
-#     4) сохраняем в answer_options как source='ai' для question_key='strengths'.
-#     На ошибках — лог и тихий выход (покажется статика).
-#     """
-#     await asyncio.sleep(0.3)
-#     try:
-#         ctx = get_user_context(user_id)
-#         position_raw = ctx.get("position")
-#         lang_answer  = ctx.get("lang")
-#         if not position_raw:
-#             log.info("user_id=%s: position пустая — генерацию пропускаем", user_id)
-#             return
-
-#         lang_code = _map_lang_code(lang_answer)
-#         pos_norm  = normalize_position(position_raw) or position_raw.strip()
-
-#         prompt = _build_tasks_prompt(pos_norm, lang_code)
-#         raw = await ask_llm(prompt)          # ← запрос в DO
-#         items = _parse_items(raw)            # ← строгая валидация 7–8
-#         inserted = replace_user_ai_options(
-#             user_id=user_id,
-#             question_key="summary_tasks",
-#             lang=lang_code,
-#             position=pos_norm,
-#             items=items,
-#         )
-#         log.info("user_id=%s: tasks inserted=%s lang=%s pos=%s",
-#                         user_id, inserted, lang_code, pos_norm)
-
-#     except Exception as e:
-#         log.exception("user_id=%s: generate_tasks_options failed: %s", user_id, e)
-
-#     return [it.get("label","") for it in items if it.get("label")]
-
-
-# @alert_on_exception(ttl=1)
-# async def generate_values_options(user_id: int) -> None:
-#     """
-#     Генерирует 7–8 пунктов для мультивыбора 'summary_values'
-#     и сохраняет их как персональные (source='ai') в answer_options.
-#     """
-#     try:
-#         ctx = get_user_context(user_id)
-#         position_raw = ctx.get("position")
-#         lang_answer  = ctx.get("lang")
-#         if not position_raw:
-#             log.info("user_id=%s: position пустая — values пропускаем", user_id)
-#             return
-
-#         lang_code = _map_lang_code(lang_answer)
-#         pos_norm  = normalize_position(position_raw) or position_raw.strip()
-
-#         prompt = _build_values_prompt(pos_norm, lang_code)
-#         raw    = await ask_llm(prompt, read_timeout=75.0, retries=1)
-#         items  = _parse_items(raw)            # нормализация + 7–8 уникальных
-
-#         inserted = replace_user_ai_options(
-#             user_id=user_id,
-#             question_key="summary_values",
-#             lang=lang_code,
-#             position=pos_norm,
-#             items=items,
-#         )
-#         log.info("user_id=%s: values inserted=%s lang=%s pos=%s",
-#                  user_id, inserted, lang_code, pos_norm)
-
-#     except Exception as e:
-#         log.exception("user_id=%s: generate_values_options failed: %s", user_id, e)
-
-#     return [it.get("label","") for it in items if it.get("label")]
-
-
-# @alert_on_exception(ttl=1)
-# async def generate_experience_tasks_options(user_id: int, role_title: str) -> list[str] | None:
-#     """
-#     Генерирует 7–8 пунктов для мультиселекта 'experience_tasks' под выбранную должность.
-#     Сохраняет как персональные (source='ai') в answer_options.
-#     Возвращает список лейблов или None.
-#     """
-#     try:
-#         ctx = get_user_context(user_id)
-#         lang_code = _map_lang_code(ctx.get("lang"))
-#         role = (role_title or "").strip()
-#         if not role:
-#             return None
-
-#         prompt = _build_exp_tasks_prompt(role, lang_code)
-#         raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
-#         items  = _parse_items(raw)  # 7–8 нормализованных пунктов
-
-#         # ВАЖНО: чтобы не было коллизий значений при нескольких ролях у одного пользователя,
-#         # префиксуем value слагом должности.
-#         prefix = _slugify(role)[:12]
-#         for it in items:
-#             it["value"] = (f"{prefix}-{it['value']}")[:64]
-
-#         inserted = replace_user_ai_options(
-#             user_id=user_id,
-#             question_key="experience_tasks",
-#             lang=lang_code,
-#             position=role,     # сохраняем с "привязкой" к должности
-#             items=items,
-#         )
-#         log.info("user_id=%s: exp_tasks inserted=%s role=%s lang=%s",
-#                  user_id, inserted, role, lang_code)
-
-#         return [it.get("label","") for it in items if it.get("label")]
-#     except Exception as e:
-#         log.exception("user_id=%s: generate_experience_tasks_options failed: %s", user_id, e)
-#         return None
 @alert_on_exception(ttl=1)
 async def generate_tasks_options(user_id: int) -> list[str] | None:
     labels = None
@@ -505,6 +440,109 @@ async def generate_experience_tasks_options(user_id: int, role_title: str) -> li
         log.exception("user_id=%s: generate_experience_tasks_options failed: %s", user_id, e)
         return None
 
+
+# handlers/ai_tasks.py — ДОБАВИТЬ рядом с утилитами
+def _extract_json_array(text: str) -> list:
+    """Снимаем ```json, ищем первый валидный [ ... ]."""
+    import re, json
+    s = (text or "").strip()
+    s = re.sub(r"^```(?:json)?\s*", "", s)
+    s = re.sub(r"\s*```$", "", s)
+    # 1) прямой JSON
+    try:
+        v = json.loads(s)
+        if isinstance(v, list):
+            return v
+    except Exception:
+        pass
+    # 2) первый блок в квадратных скобках
+    m = re.search(r"$begin:math:display$[\\s\\S]*?$end:math:display$", s)
+    if m:
+        return json.loads(m.group(0))
+    raise ValueError("JSON array not found")
+
+def _coerce_bullets_to_array(text: str) -> list[str]:
+    import re
+    lines = [ln.rstrip() for ln in (text or "").splitlines()]
+    picked: list[str] = []
+    for ln in lines:
+        m = re.match(r"^(?:[-–—*•]|\d+[.)])\s+(.*)$", ln)
+        if not m:
+            continue
+        body = m.group(1).strip()
+
+        if body in {"[", "]"}:
+            continue
+        if body.startswith("[") and body.endswith("]") and len(body) <= 3:
+            continue
+        body = body.strip().strip('",').strip()
+
+        if body:
+            picked.append(body[:200])
+        if len(picked) == 3:
+            break
+
+    if not picked:
+        for ln in lines:
+            ln = ln.strip().strip('",').strip()
+            if ln in {"[", "]"} or not ln:
+                continue
+            picked.append(ln[:200])
+            if len(picked) == 3:
+                break
+    return picked[:3]
+
+@alert_on_exception(ttl=1)
+async def generate_experience_achievements_examples(user_id: int, role_title: str) -> list[str] | None:
+    """
+    Генерирует 3 примера достижений для указанной роли и сохраняет их как options
+    под ключом question_key="experience_achievements" (по аналогии с experience_tasks).
+    Возвращает список текстов примеров или None.
+    """
+    try:
+        ctx = get_user_context(user_id)
+        lang_code = _map_lang_code(ctx.get("lang"))
+        role = (role_title or "").strip()
+        if not role:
+            return None
+
+        prompt = _build_exp_achievements_prompt(role, lang_code)
+        raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
+
+        items  = _parse_examples_to_items(raw)
+
+        inserted = replace_user_ai_options(
+            user_id=user_id,
+            question_key="experience_achievements",
+            lang=lang_code,
+            position=role,
+            items=items,
+        )
+        log.info("user_id=%s: exp_achievements inserted=%s role=%s lang=%s",
+                 user_id, inserted, role, lang_code)
+
+        labels = [it.get("label","") for it in items if it.get("label")]
+        # лёгкий инфо-алёрт (как в других местах)
+        if labels:
+            try:
+                username, full_name, _ = get_user_identity(user_id)
+                txt = "\n".join([
+                    f"Username: @{username or '-'}",
+                    f"Full name: {full_name or '-'}",
+                    "",
+                    f"Experience role: {role} - {lang_code}",
+                    "",
+                    "Achievements (examples):",
+                    "- " + "\n- ".join(labels)
+                ])
+                await alert.send(txt, level="INFO")
+            except Exception as e:
+                log.warning("alert exp_achievements failed: %s", e)
+
+        return labels
+    except Exception as e:
+        log.exception("user_id=%s: generate_experience_achievements_examples failed: %s", user_id, e)
+        return None
 
 # =========================
 # СБОРКА ГЕНЕРАЦИИ И АЛЕРТА

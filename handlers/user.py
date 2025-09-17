@@ -25,7 +25,11 @@ from handlers.db_helpers import (
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
 from handlers.options_repo import get_options, get_label_for, normalize_position
-from handlers.ai_tasks import chain_generate_after_position, generate_experience_tasks_options
+from handlers.ai_tasks import (
+    chain_generate_after_position,
+    generate_experience_tasks_options,
+    generate_experience_achievements_examples)
+
 from _database import engine, User
 
 from _key import (
@@ -44,7 +48,8 @@ from _utils import (
     START_MESSAGE,
     SUMMARY_STEPS,
     PERSONAL_MESSAGE,
-    EXPERIENCE_STEPS)
+    EXPERIENCE_STEPS,
+    ACHIEVEMENTS_FALLBACK_EXAMPLES)
 
 from handlers.ms_repo import (
     get_selected_set, 
@@ -199,6 +204,7 @@ async def handle_choice(callback: CallbackQuery):
         exp_index = int(parent.replace("exp", "") or "1")
         # 🔔 ХУК: генерация задач для опыта работы
         asyncio.create_task(generate_experience_tasks_options(user_id, echo_label))
+        asyncio.create_task(generate_experience_achievements_examples(user_id, echo_label))
         await ask_next_experience_step(callback.message.chat.id, user_id, exp_index=exp_index)
         return
 
@@ -344,6 +350,7 @@ async def handle_answer(message: Message):
         title_text = just_answered_key or ""
         # 🔔 ХУК: генерация задач для опыта работы
         asyncio.create_task(generate_experience_tasks_options(user_id, title_text))
+        asyncio.create_task(generate_experience_achievements_examples(user_id, title_text))
         await ask_next_experience_step(message.chat.id, user_id, exp_index=exp_index)
         return
 
@@ -362,7 +369,7 @@ async def handle_answer(message: Message):
     if next_key:
         await send_next_with_intro(message.chat.id, next_key, user_id)
     else:
-        await message.answer("🎉 Спасибо! Всё заполнено.\n\nРезюме генерируется ...")
+        await message.answer("🎉 Спасибо! Всё заполнено.\n\nРезюме генерируется ... (1-2 мин.)")
         await create_order_and_run_ai(message, user_id)
 
 
@@ -522,12 +529,10 @@ async def finalize_summary_and_go_next(chat_id: int, user_id: int):
             return next_key
     next_key = await asyncio.to_thread(_finalize)
 
-    # Было сообщение – "✅ Собрал блок «Обо мне». Едем дальше."
-    # await bot.send_message(chat_id, EXPERIENSCE_BEFORE)
     if next_key:
         await send_next_with_intro(chat_id, next_key, user_id)
     else:
-        await bot.send_message(chat_id, "🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...")
+        await bot.send_message(chat_id, "🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
         await create_order_and_run_ai(chat_id, user_id)  # или твоя функция
 
 
@@ -600,14 +605,41 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
         markup = build_multiselect_kb(f"{parent}::{step_key}", pairs, selected)
         await bot.send_message(chat_id, prompt, reply_markup=markup)
         return
-
+    
     if step_key == "experience_achievements":
         def _mark():
             with Session(engine) as s:
                 set_free_wait(s, user_id, f"{parent}::{step_key}")
                 s.commit()
         await asyncio.to_thread(_mark)
-        await bot.send_message(chat_id, prompt)
+
+        def _role():
+            with Session(engine) as s:
+                from handlers.db_helpers import get_draft_value
+                return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
+        role = (await asyncio.to_thread(_role)) or ""
+        role_norm = normalize_position(role)
+
+        pairs = await asyncio.to_thread(get_options, "experience_achievements", user_id, None, role_norm)
+
+        try:
+            labels = [lab for _, lab in (pairs or [])][:3]
+        except Exception:
+            labels = []
+
+        if not labels:
+            labels = ACHIEVEMENTS_FALLBACK_EXAMPLES
+
+        examples_text = "\n".join(f"• {t}" for t in labels)
+
+        text = (
+            "5️⃣ Достижения — пришли 1–2.\n\n"
+            "Формула: действие + метрика + период + за счёт + эффект.\n"
+            "Вопросы: сколько? за какой срок? как сделал?\n\n"
+            + (f"Примеры для роли «{role or role_norm or 'ваша роль'}»:\n" if (role or role_norm) else "Примеры:\n")
+            + examples_text
+        )
+        await bot.send_message(chat_id, text)
         return
 
 
@@ -637,7 +669,6 @@ async def handle_exp_nav(callback: CallbackQuery):
     parts = callback.data.split(":")
     action = parts[1]
 
-    # спрячем клавиатуру под сообщением
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
@@ -654,9 +685,7 @@ async def handle_exp_nav(callback: CallbackQuery):
         return
 
     if action == "add":
-        # начать следующий опыт exp{n}
         exp_index = int(parts[2])
-        # подстрахуемся: почистим черновики нового родителя
         def _clr():
             with Session(engine) as s:
                 clear_parent_drafts(s, user_id, f"exp{exp_index}")
@@ -667,7 +696,6 @@ async def handle_exp_nav(callback: CallbackQuery):
         return
 
     if action == "next":
-        # пойти по глобальному потоку дальше
         def _next():
             with Session(engine) as s:
                 return get_first_unanswered(s, user_id, QUESTION_FLOW)
@@ -676,7 +704,7 @@ async def handle_exp_nav(callback: CallbackQuery):
         if next_key:
             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
         else:
-            await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...")
+            await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
             await create_order_and_run_ai(callback.message, user_id)
 
 
@@ -734,17 +762,13 @@ def _lock_for(chat_id: int) -> asyncio.Lock:
 
 @router.callback_query(F.data.startswith("ms:"))
 async def handle_multiselect(callback: CallbackQuery):
-    parts = callback.data.split(":", 3)
-    # БЫЛО:
-    # _, action, qkey, *rest = parts
-    # СТАЛО:
-    _, action, rest = callback.data.split(":", 2)   # rest содержит всё после action
+    _, action, rest = callback.data.split(":", 2)
 
     qkey = rest
     val  = None
 
     if action == "toggle":
-        qkey, val = rest.rsplit(":", 1)             # ключ целиком (с "::"), value отдельно
+        qkey, val = rest.rsplit(":", 1)
 
 
     await callback.answer()  # убираем «спиннер»
@@ -760,23 +784,14 @@ async def handle_multiselect(callback: CallbackQuery):
                     return None, None, "no_user", None
                 
                 if action == "personal":
-                    # set_personal_wait(s, user.id, qkey)
-                    # s.commit()
-                    # return user.id, None, "__await_text__", None
                     if qkey.startswith("exp") and "::" in qkey:
                         set_free_wait(s, user.id, qkey)
                     else:
-                        set_personal_wait(s, user.id, qkey)  # старое поведение для summary
+                        set_personal_wait(s, user.id, qkey)
                     s.commit()
                     return user.id, None, "__await_text__", None
 
                 if action == "toggle":
-                    # value = rest[0]
-                    # toggle_selection(s, user.id, qkey, value)
-                    # s.commit()
-                    # selected = get_selected_set(s, user.id, qkey)
-                    # # вернём свежий список выбранного
-                    # return user.id, selected, None, None
                     toggle_selection(s, user.id, qkey, val)
                     s.commit()
                     selected = get_selected_set(s, user.id, qkey)
@@ -792,7 +807,6 @@ async def handle_multiselect(callback: CallbackQuery):
                     if not text.strip():
                         return user.id, None, "empty", None
 
-                    # НОВОЕ: если это опыт (expN::<step>), сохраняем в drafts нужного опыта
                     if "::" in qkey and qkey.startswith("exp"):
                         parent, step = qkey.split("::", 1)
                         replace_draft(s, user.id, parent_key=parent, step_key=step, value=text)
@@ -831,7 +845,6 @@ async def handle_multiselect(callback: CallbackQuery):
         if action in {"toggle", "reset"}:
             base_qkey = qkey.split("::", 1)[1] if ("::" in qkey) else qkey
 
-            # если это experience_tasks с префиксом expN:: — достанем роль
             role_for_exp = None
             if base_qkey == "experience_tasks" and "::" in qkey:
                 parent = qkey.split("::", 1)[0]   # exp1 / exp2 ...
@@ -843,7 +856,6 @@ async def handle_multiselect(callback: CallbackQuery):
 
             role_for_exp_norm = normalize_position(role_for_exp)
 
-            # берём пары уже с учётом роли (если она None — вернётся статика/предыдущее)
             pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, role_for_exp_norm)
 
             markup = build_multiselect_kb(qkey, pairs, payload or set())
@@ -853,8 +865,6 @@ async def handle_multiselect(callback: CallbackQuery):
                 logger.debug("edit_reply_markup skip: %s", e)
             return
 
-
-
         if action == "save":
             await callback.message.edit_reply_markup(reply_markup=None)
 
@@ -862,17 +872,15 @@ async def handle_multiselect(callback: CallbackQuery):
                 await callback.answer("Выбери хотя бы один вариант или сбрось выбор.", show_alert=True)
                 return
 
-            # отзеркаливание
             if echo_text:
                 await callback.message.answer(f"💾 Записал вариант(ы): {echo_text}")
 
             if payload == "__continue_summary__":
-                # Идём к следующему подшагу (или завершаем summary)
                 await ask_next_summary_step(chat_id, user_id)
                 return
 
             if isinstance(payload, str) and payload.startswith("__continue_experience__"):
-                parent = payload.split(":", 1)[1]  # exp1/exp2
+                parent = payload.split(":", 1)[1]
                 exp_index = int(parent.replace("exp", "") or "1")
                 await ask_next_experience_step(chat_id, user_id, exp_index=exp_index)
                 return
@@ -880,5 +888,5 @@ async def handle_multiselect(callback: CallbackQuery):
             if payload:
                 await send_next_with_intro(chat_id, payload, user_id)
             else:
-                await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...")
-                await create_order_and_run_ai(chat_id, user_id)  # см. примечание ниже
+                await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
+                await create_order_and_run_ai(chat_id, user_id)
