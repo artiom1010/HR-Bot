@@ -20,11 +20,12 @@ from handlers.db_helpers import (
     pop_personal_wait,
     set_personal_wait,
     pop_free_wait,
-    set_free_wait)
+    set_free_wait,
+    get_draft_value)
 
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
-from handlers.options_repo import get_options, get_label_for, normalize_position
+from handlers.options_repo import get_options, get_label_for, normalize_position, get_user_context
 from handlers.ai_tasks import (
     chain_generate_after_position,
     generate_experience_tasks_options,
@@ -40,24 +41,20 @@ from _key import (
     build_multiselect_kb,
     continue_kb,
     exp_finish_kb,
-    edu_start_kb, 
-    edu_finish_kb,
-    courses_kb)
+    edu_start_kb, edu_finish_kb, courses_kb,
+    lang_actions_kb, lang_choose_kb, lang_levels_kb
+    )
 
 from _utils import (
     logger,
-    CHOICES, 
-    INTRO_BEFORE, 
-    QUESTION_FLOW, 
-    START_MESSAGE,
-    SUMMARY_STEPS,
-    PERSONAL_MESSAGE,
-    EXPERIENCE_STEPS,
-    ACHIEVEMENTS_FALLBACK_EXAMPLES,
-    EDUCATION_STEPS, 
-    EDUCATION_INTRO,
-    COURSES_INTRO,
-    COURSES_ASK_TEXT)
+    CHOICES, QUESTION_FLOW, 
+    INTRO_BEFORE, START_MESSAGE,
+    SUMMARY_STEPS, PERSONAL_MESSAGE,
+    EXPERIENCE_STEPS, ACHIEVEMENTS_FALLBACK_EXAMPLES,
+    EDUCATION_STEPS, EDUCATION_INTRO,
+    COURSES_INTRO, COURSES_ASK_TEXT,
+    SKILLS_MSG_HARD, SKILLS_MSG_TOOLS, 
+    LANGS_MSG, LANG_LIST, LANG_LEVELS)
 
 from handlers.ms_repo import (
     get_selected_set, 
@@ -70,8 +67,8 @@ router = Router()
 
 # --- constants --- 
 SUMMARY_SINGLE_WITH_PERSONAL = {"summary_industry"}
-MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks"}
-PAUSE_BEFORE = {"summary", "experience"}
+MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks", "skills_hard", "skills_tools"}
+PAUSE_BEFORE = {"summary", "experience", "skills"}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -128,7 +125,6 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
     # ▶ Если это education — запускаем мини-мастер образования
     if qkey == "education" and user_id:
         await bot.send_message(chat_id, EDUCATION_INTRO, reply_markup=edu_start_kb())
-        
         def _mark_done():
             with Session(engine) as s:
                 save_answer(s, user_id, "education", "")
@@ -137,9 +133,29 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
     
     # ▶ Если это courses — просто текст с кнопками
     if qkey == "courses" and user_id:
+        def _reset():
+            with Session(engine) as s:
+                clear_parent_drafts(s, user_id, "courses")
+                s.commit()
+        await asyncio.to_thread(_reset)
+        def _mark_done():
+            with Session(engine) as s:
+                save_answer(s, user_id, "courses", "")
+        await asyncio.to_thread(_mark_done)
         await bot.send_message(chat_id, COURSES_INTRO, reply_markup=courses_kb())
         return
     
+    # ▶ Если это skills — запускаем мини-мастер навыков
+    if qkey == "skills" and user_id:
+        # чистим предыдущие черновики на всякий случай
+        def _reset():
+            with Session(engine) as s:
+                clear_parent_drafts(s, user_id, "skills")
+                s.commit()
+        await asyncio.to_thread(_reset)
+        await ask_next_skills_step(chat_id, user_id)
+        return
+
     pairs = await asyncio.to_thread(get_options, qkey, user_id, None, None)
     
     markup = None
@@ -322,7 +338,7 @@ async def handle_answer(message: Message):
                     s.commit()
                     return user.id, "summary_step_saved", None, free_qkey
                 
-                # user.py — ВНУТРИ handle_answer(), в ветке free_qkey:
+                # user.py — ВНУТРИ handle answer(), в ветке free_qkey:
                 if free_qkey.startswith("edu") and "::" in free_qkey:
                     parent, step = free_qkey.split("::", 1)
                     parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
@@ -330,19 +346,42 @@ async def handle_answer(message: Message):
                     replace_draft(s, user.id, parent_key=parent, step_key=step, value=human)
                     s.commit()
                     return user.id, f"__edu_step_saved__:{parent}", None, step
+                
+                # курсы: каждый текст — отдельная запись в parent="courses"
+                if free_qkey.startswith("courses") and "::" in free_qkey:
+                    parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
+                    human = ", ".join(parts) if parts else text
+                    # для курсов используем add_draft (НЕ replace), чтобы не затирать предыдущие
+                    add_draft(s, user.id, parent_key="courses", step_key="course_item", value=human)
+                    s.commit()
+                    # сигнал мастеру курсов «шаг сохранён»
+                    return user.id, "__courses_step_saved__", None, "courses"
+
+                if free_qkey.startswith("skills_"):
+                    parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
+                    human = ", ".join(parts) if parts else text
+                    replace_draft(s, user.id, parent_key="skills", step_key=free_qkey, value=human)
+                    s.commit()
+                    return user.id, "__continue_skills__", None, free_qkey
 
                 save_answer(s, user.id, free_qkey, text)
                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
                 return user.id, next_key, None, free_qkey
 
-            # 🔎 1) Сначала проверяем, ждём ли «личный ввод» для какого-то summary_* подшага
             awaiting_step = pop_personal_wait(s, user.id)
             if awaiting_step:
                 parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
                 human = ", ".join(parts) if parts else text
-                replace_draft(s, user.id, parent_key="summary", step_key=awaiting_step, value=human)
-                s.commit()
-                return user.id, "summary_step_saved", None, awaiting_step
+
+                if awaiting_step.startswith("summary_"):
+                    replace_draft(s, user.id, parent_key="summary", step_key=awaiting_step, value=human)
+                    s.commit()
+                    return user.id, "summary_step_saved", None, awaiting_step
+
+                if awaiting_step.startswith("skills_"):
+                    replace_draft(s, user.id, parent_key="skills", step_key=awaiting_step, value=human)
+                    s.commit()
+                    return user.id, "__continue_skills__", None, awaiting_step
 
             current_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
 
@@ -381,7 +420,6 @@ async def handle_answer(message: Message):
         exp_index = int(parent.replace("exp", "") or "1")
         title_text = just_answered_key or ""
         # 🔔 ХУК: генерация задач для опыта работы
-        # asyncio.create_task(generate_experience_tasks_options(user_id, title_text))
         asyncio.create_task(generate_experience_bundle(user_id, title_text))
         asyncio.create_task(generate_experience_achievements_examples(user_id, title_text))
         await ask_next_experience_step(message.chat.id, user_id, exp_index=exp_index)
@@ -399,10 +437,19 @@ async def handle_answer(message: Message):
         edu_index = int(parent.replace("edu", "") or "1")
         await ask_next_education_step(message.chat.id, user_id, edu_index=edu_index)
         return
+    
+    # повторный показ клавиатуры курсов после добавления пункта
+    if next_key == "__courses_step_saved__":
+        await ask_next_courses_step(message.chat.id, user_id)
+        return
 
     if error == "done":
         await message.answer("Все ответы уже собраны. 🚀")
         await create_order_and_run_ai(message, user_id)
+        return
+
+    if next_key == "__continue_skills__":
+        await ask_next_skills_step(message.chat.id, user_id)
         return
 
     if next_key:
@@ -457,33 +504,37 @@ async def handle_flow(callback: CallbackQuery):
             await callback.message.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
-
         def _mark_wait():
             with Session(engine) as s:
                 user = s.query(User).filter_by(telegram_id=tg_id).first()
                 if not user:
                     return None
-                set_free_wait(s, user.id, key)
+                wait_key = "courses::course_item" if key == "courses" else key
+                set_free_wait(s, user.id, wait_key)
                 s.commit()
                 return user.id
-
         user_id = await asyncio.to_thread(_mark_wait)
         if not user_id:
             await callback.message.answer("Сначала /start.")
             return
-
-        if key == "courses":
-            await callback.message.answer(COURSES_ASK_TEXT)
-        else:
-            await callback.message.answer(PERSONAL_MESSAGE)
+        await callback.message.answer(COURSES_ASK_TEXT if key == "courses" else PERSONAL_MESSAGE)
         return
 
     if action == "skip":
         def _work():
             with Session(engine) as s:
                 user = s.query(User).filter_by(telegram_id=tg_id).first()
-                if not user: return None, None
-                save_answer(s, user.id, key, "")
+                if not user: 
+                    return None, None
+                if key == "courses":
+                    # собрать все курсы в одну строку и очистить черновики
+                    from handlers.db_helpers import get_drafts_values_ordered
+                    parts = get_drafts_values_ordered(s, user.id, "courses")
+                    combined = " // ".join(parts) if parts else ""
+                    save_answer(s, user.id, "courses", combined)
+                    clear_parent_drafts(s, user.id, "courses")
+                else:
+                    save_answer(s, user.id, key, "")
                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
                 return user.id, next_key
             
@@ -496,7 +547,7 @@ async def handle_flow(callback: CallbackQuery):
             await callback.message.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
-        await callback.message.answer("Пропущено.")
+        # await callback.message.answer("Пропущено.")
         if next_key:
             await send_next_with_intro(chat_id, next_key, user_id)
         else:
@@ -629,7 +680,6 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
     if step_key == "experience_tasks":
         def _role():
             with Session(engine) as s:
-                from handlers.db_helpers import get_draft_value
                 return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
         role = (await asyncio.to_thread(_role)) or ""
 
@@ -851,6 +901,172 @@ async def handle_edu_nav(callback: CallbackQuery):
 
 
 
+
+
+# ────────────────────────────────────────────────────────────────────────────── 
+# Мастер courses
+# ──────────────────────────────────────────────────────────────────────────────
+async def ask_next_courses_step(chat_id: int, user_id: int):
+    # считаем, сколько черновиков уже набрали
+    def _count():
+        with Session(engine) as s:
+            return drafts_count(s, user_id, "courses")
+    n = await asyncio.to_thread(_count)
+
+    # показываем «👍 уже N курсов» и те же кнопки: [+ Добавить курс] / [⏭ Далее]
+    text = f"👍 Отлично! У нас уже есть {n} курс{'а' if 1 < n < 5 else '' if n==1 else 'ов'}."
+    await bot.send_message(chat_id, text, reply_markup=courses_kb())
+
+
+
+
+# ────────────────────────────────────────────────────────────────────────────── 
+# Мастер skills
+# ──────────────────────────────────────────────────────────────────────────────
+SKILLS_STEPS = [
+    ("skills_hard",  SKILLS_MSG_HARD),
+    ("skills_tools", SKILLS_MSG_TOOLS),
+    ("skills_langs", LANGS_MSG),
+]
+
+async def ask_next_skills_step(chat_id: int, user_id: int):
+    def _count():
+        with Session(engine) as s:
+            return drafts_completed_count(s, user_id, "skills")
+    idx = await asyncio.to_thread(_count)
+
+    if idx < len(SKILLS_STEPS):
+        step_key, prompt = SKILLS_STEPS[idx]
+
+        # 1-2 шаги — мультивыбор
+        if step_key in {"skills_hard", "skills_tools"}:
+            ctx = await asyncio.to_thread(get_user_context, user_id)
+            raw_pos = (ctx.get("position") or ctx.get("target_position") or "").strip()
+            pos_norm = normalize_position(raw_pos) if raw_pos else None
+            pairs = await asyncio.to_thread(get_options, step_key, user_id, None, pos_norm)
+            def _sel():
+                with Session(engine) as s:
+                    return get_selected_set(s, user_id, step_key)
+            selected = await asyncio.to_thread(_sel)
+            markup = build_multiselect_kb(step_key, pairs, selected)
+            await bot.send_message(chat_id, prompt, reply_markup=markup)
+            return
+
+        # 3 шаг — языки
+        if step_key == "skills_langs":
+            await bot.send_message(chat_id, prompt, reply_markup=lang_actions_kb())
+            return
+
+    await finalize_skills_and_go_next(chat_id, user_id)
+
+
+def _make_langs_text(raw: str) -> str:
+    # нормализуем как "Русский – Native // Английский – Advanced"
+    parts = [p.strip() for p in raw.split("//") if p.strip()]
+    return " // ".join(parts)
+
+
+async def finalize_skills_and_go_next(chat_id: int, user_id: int):
+    def _finish():
+        with Session(engine) as s:
+            hard  = (get_draft_value(s, user_id, "skills", "skills_hard")  or "").strip()
+            tools = (get_draft_value(s, user_id, "skills", "skills_tools") or "").strip()
+            langs = (get_draft_value(s, user_id, "skills", "skills_langs") or "").strip()
+
+            skills_text = " // ".join([p for p in [hard, tools] if p])
+            langs_text  = _make_langs_text(langs) if langs else ""
+
+            if skills_text:
+                save_answer(s, user_id, "skills", skills_text)
+            if langs_text or "languages" in dict(QUESTION_FLOW):
+                save_answer(s, user_id, "languages", langs_text)
+
+            clear_parent_drafts(s, user_id, "skills")
+            next_key = get_first_unanswered(s, user_id, QUESTION_FLOW)
+            return next_key
+
+    next_key = await asyncio.to_thread(_finish)
+    if next_key:
+        await send_next_with_intro(chat_id, next_key, user_id)
+    else:
+        await bot.send_message(chat_id, "🎉 Спасибо! Всё заполнено.\n\nРезюме генерируется ... (1–2 мин.)")
+        await create_order_and_run_ai(chat_id, user_id)
+
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Мастер языков
+# ──────────────────────────────────────────────────────────────────────────────
+@router.callback_query(F.data.startswith("lang:"))
+async def handle_lang(callback: CallbackQuery):
+    await callback.answer()
+    chat_id = callback.message.chat.id
+    tg_id = callback.from_user.id
+
+    def _get_ids():
+        with Session(engine) as s:
+            u = s.query(User).filter_by(telegram_id=tg_id).first()
+            return (u.id if u else None)
+    user_id = await asyncio.to_thread(_get_ids)
+    if not user_id:
+        await callback.message.answer("Сначала /start.")
+        return
+
+    try:
+        _, action, *rest = callback.data.split(":")
+    except ValueError:
+        return
+
+    # UI-переходы
+    if action == "add":
+        await callback.message.edit_reply_markup(reply_markup=lang_choose_kb())
+        return
+    if action == "back":
+        await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+        return
+    if action == "pick":
+        code = rest[0]
+        await callback.message.edit_reply_markup(reply_markup=lang_levels_kb(code))
+        return
+
+    # Выбор уровня → записать/обновить в drafts
+    if action == "level":
+        code, lvl_code = rest[0], rest[1]
+        # получить читабельные лейблы
+        lang_label = dict(LANG_LIST).get(code, code)
+        lvl_label  = dict(LANG_LEVELS).get(lvl_code, lvl_code)
+
+        pair = f"{lang_label} – {lvl_label}"
+
+        def _save_pair():
+            with Session(engine) as s:
+                # берём текущее значение (строка вида "Русский – Native // Английский – Advanced")
+                cur = get_draft_value(s, user_id, "skills", "skills_langs") or ""
+                # превращаем в словарь { "Русский": "Native", ... } чтобы обновлять без дублей
+                items = {}
+                for ch in [p.strip() for p in cur.split("//") if p.strip()]:
+                    if " – " in ch:
+                        lng, lvl = ch.split(" – ", 1)
+                        items[lng.strip()] = lvl.strip()
+                items[lang_label] = lvl_label  # upsert
+                new_text = " // ".join([f"{k} – {v}" for k, v in items.items()])
+                replace_draft(s, user_id, "skills", "skills_langs", new_text)
+                s.commit()
+                return new_text
+
+        new_text = await asyncio.to_thread(_save_pair)
+        await callback.message.answer(f"✅ Добавил: {pair}")
+        await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+        return
+
+    # Завершение/пропуск языков
+    if action in {"done", "skip"}:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await finalize_skills_and_go_next(chat_id, user_id)
+        return
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Пропуск вопроса
 # ──────────────────────────────────────────────────────────────────────────────
@@ -961,6 +1177,12 @@ async def handle_multiselect(callback: CallbackQuery):
                         s.commit()
                         return user.id, "__continue_summary__", "saved", text
 
+                    if qkey.startswith("skills_"):
+                        replace_draft(s, user.id, parent_key="skills", step_key=qkey, value=text)
+                        clear_selection(s, user.id, qkey)
+                        s.commit()
+                        return user.id, "__continue_skills__", "saved", text
+
                     # Остальные мультивыборы — как было
                     save_answer(s, user.id, qkey, text)
                     clear_selection(s, user.id, qkey)
@@ -1026,6 +1248,10 @@ async def handle_multiselect(callback: CallbackQuery):
                 await ask_next_experience_step(chat_id, user_id, exp_index=exp_index)
                 return
 
+            if payload == "__continue_skills__":
+                await ask_next_skills_step(chat_id, user_id)
+                return
+            
             if payload:
                 await send_next_with_intro(chat_id, payload, user_id)
             else:
