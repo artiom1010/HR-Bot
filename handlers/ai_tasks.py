@@ -121,6 +121,7 @@ def get_user_identity(user_id: int) -> tuple[str, str, int | None]:
 # ПРОМПТЫ
 # =========================
 
+# ==== summery_tasks & summary_values ====
 def _build_tasks_prompt(position: str, lang_code: str) -> str:
     return f"""
 Сгенерируй РАБОЧИЕ ЗАДАЧИ (tasks) для роли "{position}".
@@ -159,36 +160,35 @@ def _build_values_prompt(position: str, lang_code: str) -> str:
 ТРЕБОВАНИЯ К ВЫВОДУ
 - Верни СТРОГО JSON-массив из 7 или 8 объектов без пояснений и бэктиков.
 - Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<короткая фраза на {lang_code}>"}}
-- "label": 25–45 символов, простая речь, без кавычек и эмодзи.
+- "label": 25–45 символов, простая речь, без кавычек и эмодзи; формулируй как устойчивый принцип/убеждение («что ценим и как подходим»), а не как одноразовое действие или команду.
 - "value": латиница, kebab-case, уникальные, без префиксов.
 - Не более 2 универсальных пунктов (вроде «Командная работа», «Прозрачность»).
   Минимум 5 пунктов ДОЛЖНЫ описывать поведение, характерное именно для роли "{position}".
 
 ПРОСТОЕ ПРАВИЛО РЕЛЕВАНТНОСТИ (выполни мысленно, НЕ выводи):
-1) Из названия роли "{position}" выведи 3–6 ключевых ежедневных задач, инструментов и контекста.
+1) Из названия роли "{position}" мысленно выведи 3–6 ключевых ситуаций, решений и критериев качества, с которыми человек сталкивается ежедневно.
    Примеры направления мысли (НЕ печатать):
    • сервисные роли: гостевой сервис, скорость и порядок, чистота/санитария, касса/POS, обработка жалоб;
    • начинающий разработчик: читаемый код, мелкие коммиты, ревью/PR-дисциплина, базовые тесты, запрос фидбэка, ведение задач;
    • офисные/менеджерские: приоритизация задач, коммуникации со стейкхолдерами, контроль сроков/рисков, фиксация решений.
-2) Преобразуй эти задачи в поведенческие ценности/подходы: конкретные формулировки
-   («POS-операции без ошибок», «Малые фокусные коммиты ежедневно», «Чистота по чек-листу смены», «Риск-лист обновляется своевременно»).
+2) Преврати эти наблюдения в ценности: расскажи, какие принципы, убеждения или стандарты ведут эту роль («Фокус на…», «Дорожим…», «Ставим в приоритет…»), избегай описания конкретных шагов и чек-листов.
 3) Удали дубли и обобщённые синонимы. Сформируй 7–8 уникальных пунктов.
 
 ПРОВЕРКИ КАЧЕСТВА
-- Каждый "label" должен явно чувствоваться «про эту работу», а не про любую.
-- Избегай пустых слов («эффективность», «ответственность») без конкретики.
-- Сохраняй разнообразие: покрывай разные стороны ежедневной работы роли.
+- Каждый "label" — устойчивый принцип, который чувствуется «про эту работу», а не про любую.
+- Избегай повелительных формулировок («делай», «держи», «поддерживать») и прямого перечисления задач; акцентируй на ценности и подходе.
+- Сохраняй разнообразие: отражай качество, взаимодействия, риски, скорость, документацию и другие аспекты ежедневной работы роли.
 
 ФОРМАТ ОТВЕТА (пример структуры, НЕ печатать сам пример):
 [
-  {{"value":"small-focused-commits","label":"Малые фокусные коммиты ежедневно"}},
-  {{"value":"pos-accuracy","label":"POS-операции без ошибок"}},
+  {{"value":"release-stability-focus","label":"Фокус на устойчивости релизов"}},
+  {{"value":"stakeholder-clarity","label":"Прозрачные апдейты для стейкхолдеров"}},
   ...
 ]
 """.strip()
 
 
-
+# ==== experience_tasks & experience_achievements ====
 def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
     return f"""
 Сгенерируй 7–8 типичных рабочих ЗАДАЧ для должности "{role_title}".
@@ -222,7 +222,7 @@ def _build_exp_achievements_prompt(role_title: str, lang_code: str) -> str:
 действие + метрика + период + за счёт + эффект.
 
 Требования к стилю:
-- 90–150 символов на строку.
+- 25–45 символов на строку.
 - Конкретные числа/проценты/сроки (если уместно).
 - Без эмодзи, без кавычек, без Markdown.
 - Фразы должны чувствоваться "про {role_title}" (лексика/контекст роли).
@@ -239,6 +239,46 @@ def _build_exp_achievements_prompt(role_title: str, lang_code: str) -> str:
   "Довёл NPS до 4.8/5 за квартал обучением — повторные покупки +15%."
 ]
 """.strip()
+
+
+# ==== skills_hard & skills_tools ====
+def _build_skills_hard_prompt(position: str, lang_code: str) -> str:
+    return f"""
+Сгенерируй профессиональные НАВЫКИ (hard skills) для резюме под позицию "{position}".
+Язык меток (label): "{lang_code}".
+
+ТРЕБОВАНИЯ:
+- Верни СТРОГО JSON-массив 7–12 объектов без пояснений и без бэктиков.
+- Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<краткий навык на {lang_code}>"}}
+- "label": 1–3 слова, без кавычек и эмодзи, конкретные навыки/методики/области.
+- "value": латиница, kebab-case, уникальные.
+
+ПРИМЕР СТРУКТУРЫ (НЕ печатать его):
+[
+  {{"value":"competency-interviews","label":"Интервью по компетенциям"}},
+  {{"value":"workforce-planning","label":"Планирование штата"}}
+]
+""".strip()
+
+
+def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
+    return f"""
+Сгенерируй СПИСОК ИНСТРУМЕНТОВ/ПРОГРАММ (tools) для резюме под позицию "{position}".
+Язык меток (label): "{lang_code}".
+
+ТРЕБОВАНИЯ:
+- Верни СТРОГО JSON-массив 6–10 объектов без пояснений и без бэктиков.
+- Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<инструмент/пакет на {lang_code}>"}}
+- "label": коротко, как в резюме (напр. "MS Office / Google Workspace", "Jira / Confluence", "CRM (Bitrix24, Salesforce)").
+- "value": латиница, kebab-case, уникальные.
+
+ПРИМЕР СТРУКТУРЫ (НЕ печатать его):
+[
+  {{"value":"ms-office-google-workspace","label":"MS Office / Google Workspace"}},
+  {{"value":"jira-asana-trello","label":"Jira / Asana / Trello"}}
+]
+""".strip()
+
 
 # =========================
 # ЗАПРОС К ТВОЕМУ DO-АГЕНТУ
@@ -307,7 +347,6 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
 # =========================
 # ОСНОВНЫЕ ФОНОВЫЕ ЗАДАЧИ
 # =========================
-
 @alert_on_exception(ttl=1)
 async def generate_tasks_options(user_id: int) -> list[str] | None:
     labels = None
@@ -372,10 +411,7 @@ async def generate_values_options(user_id: int) -> list[str] | None:
 
 
 
-
-
 _MAX_VALUE_LEN_FOR_CB = 28
-
 def _short_value_for_cb(raw_value: str, role: str) -> str:
     """
     Возвращает короткий, уникальный и безопасный value для кнопок:
@@ -390,7 +426,6 @@ def _short_value_for_cb(raw_value: str, role: str) -> str:
 
 
 @alert_on_exception(ttl=1)
-# async def generate_experience_tasks_options(user_id: int, role_title: str) -> list[str] | None:
 async def generate_experience_tasks_options(user_id: int, role_title: str, *, notify: bool = False) -> list[str] | None:
     try:
         ctx = get_user_context(user_id)
@@ -494,7 +529,6 @@ def _coerce_bullets_to_array(text: str) -> list[str]:
     return picked[:3]
 
 @alert_on_exception(ttl=1)
-# async def generate_experience_achievements_examples(user_id: int, role_title: str) -> list[str] | None:
 async def generate_experience_achievements_examples(user_id: int, role_title: str, *, notify: bool = False) -> list[str] | None:
 
     """
@@ -547,6 +581,72 @@ async def generate_experience_achievements_examples(user_id: int, role_title: st
         log.exception("user_id=%s: generate_experience_achievements_examples failed: %s", user_id, e)
         return None
 
+
+
+@alert_on_exception(ttl=1)
+async def generate_skills_hard_options(user_id: int) -> list[str] | None:
+    """ИИ-подсказки для skills_hard на основе target_position."""
+    labels = None
+    try:
+        ctx = get_user_context(user_id)
+        position_raw = ctx.get("position") or ctx.get("target_position")  # на всякий
+        if not position_raw:
+            return None
+        lang_code = _map_lang_code(ctx.get("lang"))
+        pos_norm  = normalize_position(position_raw) or position_raw.strip()
+
+        prompt = _build_skills_hard_prompt(pos_norm, lang_code)
+        raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
+        items  = _parse_items(raw)
+
+        inserted = replace_user_ai_options(
+            user_id=user_id,
+            question_key="skills_hard",
+            lang=lang_code,
+            position=pos_norm,        # ← ключ: привязываем к позиции
+            items=items,
+        )
+        log.info("user_id=%s: skills_hard inserted=%s lang=%s pos=%s",
+                 user_id, inserted, lang_code, pos_norm)
+
+        labels = [it["label"] for it in items if it.get("label")]
+    except Exception as e:
+        log.exception("user_id=%s: generate_skills_hard_options failed: %s", user_id, e)
+    return labels
+
+
+@alert_on_exception(ttl=1)
+async def generate_skills_tools_options(user_id: int) -> list[str] | None:
+    """ИИ-подсказки для skills_tools на основе target_position."""
+    labels = None
+    try:
+        ctx = get_user_context(user_id)
+        position_raw = ctx.get("position") or ctx.get("target_position")
+        if not position_raw:
+            return None
+        lang_code = _map_lang_code(ctx.get("lang"))
+        pos_norm  = normalize_position(position_raw) or position_raw.strip()
+
+        prompt = _build_skills_tools_prompt(pos_norm, lang_code)
+        raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
+        items  = _parse_items(raw)
+
+        inserted = replace_user_ai_options(
+            user_id=user_id,
+            question_key="skills_tools",
+            lang=lang_code,
+            position=pos_norm,
+            items=items,
+        )
+        log.info("user_id=%s: skills_tools inserted=%s lang=%s pos=%s",
+                 user_id, inserted, lang_code, pos_norm)
+
+        labels = [it["label"] for it in items if it.get("label")]
+    except Exception as e:
+        log.exception("user_id=%s: generate_skills_tools_options failed: %s", user_id, e)
+    return labels
+
+
 # =========================
 # СБОРКА ГЕНЕРАЦИИ И АЛЕРТА
 # =========================
@@ -556,6 +656,10 @@ async def chain_generate_after_position(user_id: int):
         task_labels  = await generate_tasks_options(user_id)
         await asyncio.sleep(2.0)
         value_labels = await generate_values_options(user_id)
+        await asyncio.sleep(2.0)
+        hard_labels = await generate_skills_hard_options(user_id)
+        await asyncio.sleep(2.0)
+        tools_labels = await generate_skills_tools_options(user_id)
 
         username, full_name, _ = get_user_identity(user_id)
         ctx = get_user_context(user_id)
@@ -572,6 +676,10 @@ async def chain_generate_after_position(user_id: int):
             parts += ["", "Tasks:", "- " + "\n- ".join(task_labels)]
         if value_labels:
             parts += ["", "Values:", "- " + "\n- ".join(value_labels)]
+        if hard_labels:
+            parts += ["", "Hard skills:", "- " + "\n- ".join(hard_labels)]
+        if tools_labels:
+            parts += ["", "Tools:", "- " + "\n- ".join(tools_labels)]
 
         txt = "\n".join(parts)
         ok = await alert.send(txt, level="INFO")

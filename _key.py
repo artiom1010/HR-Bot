@@ -3,6 +3,7 @@ from typing import List, Tuple, Set
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from _utils import LANG_LIST, LANG_LEVELS
 
 def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -12,10 +13,9 @@ def start_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def continue_kb(next_key: str) -> InlineKeyboardMarkup:
+def continue_kb(next_key: str, label: str = " 🚀 Продолжить"):
     kb = InlineKeyboardBuilder()
-    kb.button(text="🚀 Да, поехали!", callback_data=f"cont:{next_key}")
-    kb.adjust(1)
+    kb.button(text=label, callback_data=f"cont:{next_key}")
     return kb.as_markup()
 
 
@@ -59,6 +59,7 @@ def exp_finish_kb(next_index: int) -> InlineKeyboardMarkup:
         ]
     )
 
+
 # ============== EDUCATION KEYBOARDS
 
 def edu_start_kb() -> InlineKeyboardMarkup:
@@ -75,6 +76,34 @@ def edu_finish_kb(next_index: int) -> InlineKeyboardMarkup:
     kb.button(text="⏭ Далее",                          callback_data="edu:next")
     kb.adjust(1)
     return kb.as_markup()
+
+
+# ============== LANG STEP KEYBOARDS
+def lang_actions_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить язык", callback_data="lang:add")
+    kb.button(text="✅ Готово", callback_data="lang:done")
+    kb.button(text="⏭ Пропустить", callback_data="lang:skip")
+    kb.adjust(1, 2)
+    return kb.as_markup()
+
+def lang_choose_kb():
+    kb = InlineKeyboardBuilder()
+    for code, label in LANG_LIST:
+        kb.button(text=label, callback_data=f"lang:pick:{code}")
+    kb.button(text="⬅︎ Назад", callback_data="lang:back")
+    kb.adjust(2)
+    return kb.as_markup()
+
+def lang_levels_kb(code: str):
+    kb = InlineKeyboardBuilder()
+    for lvl_code, lvl_label in LANG_LEVELS:
+        kb.button(text=lvl_label, callback_data=f"lang:level:{code}:{lvl_code}")
+    kb.button(text="⬅︎ Назад", callback_data="lang:add")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 
 
 def courses_kb() -> InlineKeyboardMarkup:
