@@ -91,6 +91,7 @@ def lang_choose_kb():
     kb = InlineKeyboardBuilder()
     for code, label in LANG_LIST:
         kb.button(text=label, callback_data=f"lang:pick:{code}")
+    kb.button(text="👤 Свой язык", callback_data="lang:custom")
     kb.button(text="⬅︎ Назад", callback_data="lang:back")
     kb.adjust(2)
     return kb.as_markup()
@@ -99,6 +100,15 @@ def lang_levels_kb(code: str):
     kb = InlineKeyboardBuilder()
     for lvl_code, lvl_label in LANG_LEVELS:
         kb.button(text=lvl_label, callback_data=f"lang:level:{code}:{lvl_code}")
+    kb.button(text="⬅︎ Назад", callback_data="lang:add")
+    kb.adjust(1)
+    return kb.as_markup()
+
+def lang_levels_custom_kb():                                     # ← НОВОЕ
+    """Клавиатура уровней для кастомного языка (код не нужен)."""
+    kb = InlineKeyboardBuilder()
+    for lvl_code, lvl_label in LANG_LEVELS:
+        kb.button(text=lvl_label, callback_data=f"lang:level_custom:{lvl_code}")
     kb.button(text="⬅︎ Назад", callback_data="lang:add")
     kb.adjust(1)
     return kb.as_markup()

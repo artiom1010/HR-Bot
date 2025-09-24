@@ -42,7 +42,7 @@ from _key import (
     continue_kb,
     exp_finish_kb,
     edu_start_kb, edu_finish_kb, courses_kb,
-    lang_actions_kb, lang_choose_kb, lang_levels_kb
+    lang_actions_kb, lang_choose_kb, lang_levels_kb, lang_levels_custom_kb
     )
 
 from _utils import (
@@ -364,6 +364,13 @@ async def handle_answer(message: Message):
                     s.commit()
                     return user.id, "__continue_skills__", None, free_qkey
 
+                if free_qkey == "lang_custom":
+                    name = _norm_lang_label(text)   # ту же утилиту можно скопировать сюда или импортнуть
+                    replace_draft(s, user.id, parent_key="skills", step_key="skills_langs__tmp_name", value=name)
+                    s.commit()
+                    # просим выбрать уровень
+                    return user.id, "__ask_level_for_custom_lang__", None, name
+
                 save_answer(s, user.id, free_qkey, text)
                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
                 return user.id, next_key, None, free_qkey
@@ -450,6 +457,11 @@ async def handle_answer(message: Message):
 
     if next_key == "__continue_skills__":
         await ask_next_skills_step(message.chat.id, user_id)
+        return
+    
+    if next_key == "__ask_level_for_custom_lang__":
+        await message.answer(f"Язык: {just_answered_key}\nТеперь выбери уровень:")
+        await bot.send_message(message.chat.id, "Уровень владения:", reply_markup=lang_levels_custom_kb())
         return
 
     if next_key:
@@ -998,17 +1010,109 @@ async def finalize_skills_and_go_next(chat_id: int, user_id: int):
 # ──────────────────────────────────────────────────────────────────────────────
 # Мастер языков
 # ──────────────────────────────────────────────────────────────────────────────
+
+# Небольшие утилиты (положи рядом с handle_lang)
+def _norm_lang_label(s: str) -> str:
+    s = (s or "").strip()
+    # Делаем человекочитаемое: первая буква заглавная, остальное как есть
+    # Можно заменить на .title(), если хочешь "Польский" -> "Польский".
+    return s[:1].upper() + s[1:] if s else s
+
+def _upsert_lang_pair(s: Session, user_id: int, lang_label: str, lvl_label: str) -> str:
+    # читаем текущий текст черновика
+    cur = get_draft_value(s, user_id, "skills", "skills_langs") or ""
+    items = {}
+    for ch in [p.strip() for p in cur.split("//") if p.strip()]:
+        if " – " in ch:
+            lng, lvl = ch.split(" – ", 1)
+            items[lng.strip()] = lvl.strip()
+    items[lang_label] = lvl_label  # upsert
+    new_text = " // ".join([f"{k} – {v}" for k, v in items.items()])
+    replace_draft(s, user_id, "skills", "skills_langs", new_text)
+    # очищаем временное имя кастомного языка, если было
+    replace_draft(s, user_id, "skills", "skills_langs__tmp_name", "")
+    s.commit()
+    return new_text
+
+
+# @router.callback_query(F.data.startswith("lang:"))
+# async def handle_lang(callback: CallbackQuery):
+#     await callback.answer()
+#     chat_id = callback.message.chat.id
+#     tg_id = callback.from_user.id
+
+#     def _get_ids():
+#         with Session(engine) as s:
+#             u = s.query(User).filter_by(telegram_id=tg_id).first()
+#             return (u.id if u else None)
+#     user_id = await asyncio.to_thread(_get_ids)
+#     if not user_id:
+#         await callback.message.answer("Сначала /start.")
+#         return
+
+#     try:
+#         _, action, *rest = callback.data.split(":")
+#     except ValueError:
+#         return
+
+#     # UI-переходы
+#     if action == "add":
+#         await callback.message.edit_reply_markup(reply_markup=lang_choose_kb())
+#         return
+#     if action == "back":
+#         await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+#         return
+#     if action == "pick":
+#         code = rest[0]
+#         await callback.message.edit_reply_markup(reply_markup=lang_levels_kb(code))
+#         return
+
+#     # Выбор уровня → записать/обновить в drafts
+#     if action == "level":
+#         code, lvl_code = rest[0], rest[1]
+#         # получить читабельные лейблы
+#         lang_label = dict(LANG_LIST).get(code, code)
+#         lvl_label  = dict(LANG_LEVELS).get(lvl_code, lvl_code)
+
+#         pair = f"{lang_label} – {lvl_label}"
+
+#         def _save_pair():
+#             with Session(engine) as s:
+#                 # берём текущее значение (строка вида "Русский – Native // Английский – Advanced")
+#                 cur = get_draft_value(s, user_id, "skills", "skills_langs") or ""
+#                 # превращаем в словарь { "Русский": "Native", ... } чтобы обновлять без дублей
+#                 items = {}
+#                 for ch in [p.strip() for p in cur.split("//") if p.strip()]:
+#                     if " – " in ch:
+#                         lng, lvl = ch.split(" – ", 1)
+#                         items[lng.strip()] = lvl.strip()
+#                 items[lang_label] = lvl_label  # upsert
+#                 new_text = " // ".join([f"{k} – {v}" for k, v in items.items()])
+#                 replace_draft(s, user_id, "skills", "skills_langs", new_text)
+#                 s.commit()
+#                 return new_text
+
+#         new_text = await asyncio.to_thread(_save_pair)
+#         await callback.message.answer(f"✅ Добавил: {pair}")
+#         await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+#         return
+
+#     # Завершение/пропуск языков
+#     if action in {"done", "skip"}:
+#         await callback.message.edit_reply_markup(reply_markup=None)
+#         await finalize_skills_and_go_next(chat_id, user_id)
+#         return
 @router.callback_query(F.data.startswith("lang:"))
 async def handle_lang(callback: CallbackQuery):
     await callback.answer()
     chat_id = callback.message.chat.id
     tg_id = callback.from_user.id
 
-    def _get_ids():
+    def _get_uid():
         with Session(engine) as s:
             u = s.query(User).filter_by(telegram_id=tg_id).first()
             return (u.id if u else None)
-    user_id = await asyncio.to_thread(_get_ids)
+    user_id = await asyncio.to_thread(_get_uid)
     if not user_id:
         await callback.message.answer("Сначала /start.")
         return
@@ -1030,10 +1134,24 @@ async def handle_lang(callback: CallbackQuery):
         await callback.message.edit_reply_markup(reply_markup=lang_levels_kb(code))
         return
 
-    # Выбор уровня → записать/обновить в drafts
+    # 👤 Кастомный язык — просим текстом
+    if action == "custom":                                         # ← НОВОЕ
+        # ждём текст от пользователя с ключом 'lang_custom'
+        def _mark_wait():
+            with Session(engine) as s:
+                set_free_wait(s, user_id, "lang_custom")
+                s.commit()
+        await asyncio.to_thread(_mark_wait)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await callback.message.answer("Напиши язык (например: Польский, Итальянский).")
+        return
+
+    # Выбор уровня для языка из списка
     if action == "level":
         code, lvl_code = rest[0], rest[1]
-        # получить читабельные лейблы
         lang_label = dict(LANG_LIST).get(code, code)
         lvl_label  = dict(LANG_LEVELS).get(lvl_code, lvl_code)
 
@@ -1041,26 +1159,31 @@ async def handle_lang(callback: CallbackQuery):
 
         def _save_pair():
             with Session(engine) as s:
-                # берём текущее значение (строка вида "Русский – Native // Английский – Advanced")
-                cur = get_draft_value(s, user_id, "skills", "skills_langs") or ""
-                # превращаем в словарь { "Русский": "Native", ... } чтобы обновлять без дублей
-                items = {}
-                for ch in [p.strip() for p in cur.split("//") if p.strip()]:
-                    if " – " in ch:
-                        lng, lvl = ch.split(" – ", 1)
-                        items[lng.strip()] = lvl.strip()
-                items[lang_label] = lvl_label  # upsert
-                new_text = " // ".join([f"{k} – {v}" for k, v in items.items()])
-                replace_draft(s, user_id, "skills", "skills_langs", new_text)
-                s.commit()
-                return new_text
+                return _upsert_lang_pair(s, user_id, lang_label, lvl_label)
 
-        new_text = await asyncio.to_thread(_save_pair)
+        await asyncio.to_thread(_save_pair)
         await callback.message.answer(f"✅ Добавил: {pair}")
         await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
         return
 
-    # Завершение/пропуск языков
+    # Выбор уровня для КАСТОМНОГО языка
+    if action == "level_custom":                                   # ← НОВОЕ
+        lvl_code = rest[0]
+        lvl_label = dict(LANG_LEVELS).get(lvl_code, lvl_code)
+
+        def _finish_custom():
+            with Session(engine) as s:
+                name = get_draft_value(s, user_id, "skills", "skills_langs__tmp_name") or ""
+                lang_label = _norm_lang_label(name)
+                _upsert_lang_pair(s, user_id, lang_label, lvl_label)
+                return lang_label
+
+        lang_label = await asyncio.to_thread(_finish_custom)
+        await callback.message.answer(f"✅ Добавил: {lang_label} – {lvl_label}")
+        await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+        return
+
+    # Готово / пропустить
     if action in {"done", "skip"}:
         await callback.message.edit_reply_markup(reply_markup=None)
         await finalize_skills_and_go_next(chat_id, user_id)
