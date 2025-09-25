@@ -1,5 +1,5 @@
 .env
-__pycache__/
 other/
 fff/
 resume_bot.db
+__pycache__/
