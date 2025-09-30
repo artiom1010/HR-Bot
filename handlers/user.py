@@ -147,7 +147,6 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
     
     # ▶ Если это skills — запускаем мини-мастер навыков
     if qkey == "skills" and user_id:
-        # чистим предыдущие черновики на всякий случай
         def _reset():
             with Session(engine) as s:
                 clear_parent_drafts(s, user_id, "skills")
@@ -234,14 +233,12 @@ async def handle_choice(callback: CallbackQuery):
         return
 
     if echo_label:
-        await callback.message.answer(f"💾 Записал вариант(ы): {echo_label}")
+        await callback.message.answer(f"🌟 Готово! Сохранил твои вариант(ы): {echo_label}")
 
-    # если только что сохранили должность — запускаем генерацию задач в event loop
     if isinstance(next_key, str) and next_key.startswith("__experience_title_saved__"):
-        parent = next_key.split(":", 1)[1]          # exp1 / exp2 / ...
+        parent = next_key.split(":", 1)[1]
         exp_index = int(parent.replace("exp", "") or "1")
         # 🔔 ХУК: генерация задач для опыта работы
-        # asyncio.create_task(generate_experience_tasks_options(user_id, echo_label))
         asyncio.create_task(generate_experience_bundle(user_id, echo_label))
         asyncio.create_task(generate_experience_achievements_examples(user_id, echo_label))
         await ask_next_experience_step(callback.message.chat.id, user_id, exp_index=exp_index)
@@ -279,7 +276,6 @@ async def start_handler(message: Message):
 @router.callback_query(F.data == "starts")
 async def handle_start(callback: CallbackQuery):
     await callback.answer()
-    # скрыть клавиатуру под приветствием (чтобы не жали повторно)
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception as e:
@@ -307,6 +303,11 @@ async def handle_start(callback: CallbackQuery):
 # ──────────────────────────────────────────────────────────────────────────────
 # Ответы текстом
 # ──────────────────────────────────────────────────────────────────────────────
+@router.message(~F.text)  # любое не-текстовое
+async def handle_non_text(message: Message):
+    await message.answer("Я пока понимаю только текст 😊 Пришли, пожалуйста, текстом.")
+
+
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_answer(message: Message):
     tg_id = message.from_user.id
@@ -318,7 +319,6 @@ async def handle_answer(message: Message):
             if not user:
                 return None, None, "no_user", None
 
-            # 0) Свободный текст для ЛЮБОГО ключа (универсальный флаг __free__)
             free_qkey = pop_free_wait(s, user.id)
             if free_qkey:
                 if free_qkey.startswith("exp") and "::" in free_qkey:
@@ -1235,6 +1235,8 @@ async def handle_free(callback: CallbackQuery):
 # Мультиселект
 # ──────────────────────────────────────────────────────────────────────────────
 _chat_locks: dict[int, asyncio.Lock] = {}
+_last_save_ts: dict[tuple[int, str], float] = {}
+
 def _lock_for(chat_id: int) -> asyncio.Lock:
     if chat_id not in _chat_locks:
         _chat_locks[chat_id] = asyncio.Lock()
@@ -1250,11 +1252,18 @@ async def handle_multiselect(callback: CallbackQuery):
     if action == "toggle":
         qkey, val = rest.rsplit(":", 1)
 
-
-    await callback.answer()  # убираем «спиннер»
+    await callback.answer()
 
     chat_id = callback.message.chat.id
     tg_id = callback.from_user.id
+
+    if action == "save":
+        now = asyncio.get_event_loop().time()
+        key_ = (chat_id, qkey)
+        if _last_save_ts.get(key_, 0) + 0.6 > now:
+            await callback.answer("Уже сохраняю…", show_alert=False)
+            return
+        _last_save_ts[key_] = now
 
     async with _lock_for(chat_id):
         def _work():
@@ -1312,10 +1321,9 @@ async def handle_multiselect(callback: CallbackQuery):
                     next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
                     s.commit()
                     return user.id, next_key, "saved", text
-
                 return user.id, None, None, None
-
         user_id, payload, status, echo_text = await asyncio.to_thread(_work)
+
         if not user_id:
             await callback.message.answer("Сначала /start.")
             return
@@ -1339,11 +1347,9 @@ async def handle_multiselect(callback: CallbackQuery):
                         from handlers.db_helpers import get_draft_value
                         return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
                 role_for_exp = await asyncio.to_thread(_role)
-
             role_for_exp_norm = normalize_position(role_for_exp)
-
             pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, role_for_exp_norm)
-
+            pairs = pairs or []
             markup = build_multiselect_kb(qkey, pairs, payload or set())
             try:
                 await callback.message.edit_reply_markup(reply_markup=markup)
@@ -1352,14 +1358,37 @@ async def handle_multiselect(callback: CallbackQuery):
             return
 
         if action == "save":
-            await callback.message.edit_reply_markup(reply_markup=None)
-
             if status == "empty":
                 await callback.answer("Выбери хотя бы один вариант или сбрось выбор.", show_alert=True)
+                base_qkey = qkey.split("::", 1)[1] if ("::" in qkey) else qkey
+                role_for_exp = None
+                if base_qkey == "experience_tasks" and "::" in qkey:
+                    parent = qkey.split("::", 1)[0]
+                    def _role():
+                        with Session(engine) as s:
+                            from handlers.db_helpers import get_draft_value
+                            return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
+                    role_for_exp = await asyncio.to_thread(_role)
+
+                role_for_exp_norm = normalize_position(role_for_exp)
+
+                pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, role_for_exp_norm)
+                def _sel():
+                    with Session(engine) as s:
+                        return get_selected_set(s, user_id, qkey)
+                selected_now = await asyncio.to_thread(_sel)
+                try:
+                    await callback.message.edit_reply_markup(
+                        reply_markup=build_multiselect_kb(qkey, pairs, selected_now or set())
+                    )
+                except Exception as e:
+                    logger.debug("edit_reply_markup (empty-save) skip: %s", e)
                 return
+            # 2) а вот ТЕПЕРЬ, когда точно не пусто — снимаем клавиатуру
+            await callback.message.edit_reply_markup(reply_markup=None)
 
             if echo_text:
-                await callback.message.answer(f"💾 Записал вариант(ы): {echo_text}")
+                await callback.message.answer(f"🌟 Готово! Сохранил твои вариант(ы): {echo_text}")
 
             if payload == "__continue_summary__":
                 await ask_next_summary_step(chat_id, user_id)
