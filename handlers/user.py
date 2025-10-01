@@ -233,7 +233,7 @@ async def handle_choice(callback: CallbackQuery):
         return
 
     if echo_label:
-        await callback.message.answer(f"🌟 Готово! Сохранил твои вариант(ы): {echo_label}")
+        await callback.message.answer(f"🌟 Готово! Сохранил вариант(ы): {echo_label}")
 
     if isinstance(next_key, str) and next_key.startswith("__experience_title_saved__"):
         parent = next_key.split(":", 1)[1]
@@ -1162,8 +1162,13 @@ async def handle_lang(callback: CallbackQuery):
                 return _upsert_lang_pair(s, user_id, lang_label, lvl_label)
 
         await asyncio.to_thread(_save_pair)
-        await callback.message.answer(f"✅ Добавил: {pair}")
-        await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+        # await callback.message.answer(f"✅ Добавил: {pair}")
+        await callback.answer(f"✅ Добавлено: {pair}", show_alert=False)
+        # await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+        extra = await asyncio.to_thread(_current_langs_text, user_id)
+        text = LANGS_MSG + extra
+        await callback.message.edit_text(text, reply_markup=lang_actions_kb())
+        await callback.answer("✅ Сохранено", show_alert=False)
         return
 
     # Выбор уровня для КАСТОМНОГО языка
@@ -1179,8 +1184,13 @@ async def handle_lang(callback: CallbackQuery):
                 return lang_label
 
         lang_label = await asyncio.to_thread(_finish_custom)
-        await callback.message.answer(f"✅ Добавил: {lang_label} – {lvl_label}")
-        await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+        # await callback.message.answer(f"✅ Добавил: {lang_label} – {lvl_label}")
+        await callback.answer(f"✅ {lang_label} – {lvl_label}", show_alert=False)
+        # await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+        extra = await asyncio.to_thread(_current_langs_text, user_id)
+        text = LANGS_MSG + extra
+        await callback.message.edit_text(text, reply_markup=lang_actions_kb())
+        await callback.answer("✅ Сохранено", show_alert=False)
         return
 
     # Готово / пропустить
@@ -1189,7 +1199,13 @@ async def handle_lang(callback: CallbackQuery):
         await finalize_skills_and_go_next(chat_id, user_id)
         return
 
-
+def _current_langs_text(user_id: int) -> str:
+    with Session(engine) as s:
+        cur = get_draft_value(s, user_id, "skills", "skills_langs") or ""
+    items = [p.strip() for p in cur.split("//") if p.strip()]
+    if not items:
+        return ""
+    return "\n\n──────────────\n🌟 Сейчас выбрано:\n" + "\n".join(f"• {it}" for it in items) + "\n──────────────"
 # ──────────────────────────────────────────────────────────────────────────────
 # Пропуск вопроса
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1388,7 +1404,7 @@ async def handle_multiselect(callback: CallbackQuery):
             await callback.message.edit_reply_markup(reply_markup=None)
 
             if echo_text:
-                await callback.message.answer(f"🌟 Готово! Сохранил твои вариант(ы): {echo_text}")
+                await callback.message.answer(f"🌟 Готово! Сохранил вариант(ы): {echo_text}")
 
             if payload == "__continue_summary__":
                 await ask_next_summary_step(chat_id, user_id)
