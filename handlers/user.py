@@ -62,6 +62,10 @@ from handlers.ms_repo import (
     clear_selection, 
     build_answer_text_from_selection)
 
+from handlers.validators import (
+    _too_many_words, validate_field
+)
+
 
 router = Router()
 
@@ -69,6 +73,10 @@ router = Router()
 SUMMARY_SINGLE_WITH_PERSONAL = {"summary_industry"}
 MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks", "skills_hard", "skills_tools"}
 PAUSE_BEFORE = {"summary", "experience", "skills"}
+
+WORD_LIMIT = 100
+TRGT_POSITION_MAX = 50
+EXP_POSITION_MAX  = 50
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -311,9 +319,14 @@ async def handle_non_text(message: Message):
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_answer(message: Message):
     tg_id = message.from_user.id
-    text = message.text.strip()
+    # text = message.text.strip()
+    raw_text = (message.text or "").strip()
 
-    def _work():
+    if _too_many_words(raw_text, WORD_LIMIT):
+        await message.answer(f"💡 Текст получился длинноватым. Попробуй сократить до {WORD_LIMIT} слов 🙂")
+        return
+
+    def _work(text_in: str):
         with Session(engine) as s:
             user = s.query(User).filter_by(telegram_id=tg_id).first()
             if not user:
@@ -323,8 +336,10 @@ async def handle_answer(message: Message):
             if free_qkey:
                 if free_qkey.startswith("exp") and "::" in free_qkey:
                     parent, step = free_qkey.split("::", 1)
-                    parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
-                    human = ", ".join(parts) if parts else text
+                    parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
+                    human = ", ".join(parts) if parts else text_in
+                    if step == "experience_title" and len(human) > EXP_POSITION_MAX:
+                        return user.id, None, "exp_title_too_long", None
                     replace_draft(s, user.id, parent_key=parent, step_key=step, value=human)
                     s.commit()
 
@@ -334,51 +349,50 @@ async def handle_answer(message: Message):
 
                 # как и было: summary_* свой вариант
                 if free_qkey.startswith("summary_"):
-                    add_draft(s, user.id, "summary", free_qkey, text)
+                    add_draft(s, user.id, "summary", free_qkey, text_in)
                     s.commit()
                     return user.id, "summary_step_saved", None, free_qkey
                 
                 # user.py — ВНУТРИ handle answer(), в ветке free_qkey:
                 if free_qkey.startswith("edu") and "::" in free_qkey:
                     parent, step = free_qkey.split("::", 1)
-                    parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
-                    human = ", ".join(parts) if parts else text
+                    parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
+                    human = ", ".join(parts) if parts else text_in
                     replace_draft(s, user.id, parent_key=parent, step_key=step, value=human)
                     s.commit()
                     return user.id, f"__edu_step_saved__:{parent}", None, step
                 
                 # курсы: каждый текст — отдельная запись в parent="courses"
                 if free_qkey.startswith("courses") and "::" in free_qkey:
-                    parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
-                    human = ", ".join(parts) if parts else text
+                    parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
+                    human = ", ".join(parts) if parts else text_in
                     # для курсов используем add_draft (НЕ replace), чтобы не затирать предыдущие
                     add_draft(s, user.id, parent_key="courses", step_key="course_item", value=human)
                     s.commit()
-                    # сигнал мастеру курсов «шаг сохранён»
                     return user.id, "__courses_step_saved__", None, "courses"
 
                 if free_qkey.startswith("skills_"):
-                    parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
-                    human = ", ".join(parts) if parts else text
+                    parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
+                    human = ", ".join(parts) if parts else text_in
                     replace_draft(s, user.id, parent_key="skills", step_key=free_qkey, value=human)
                     s.commit()
                     return user.id, "__continue_skills__", None, free_qkey
 
                 if free_qkey == "lang_custom":
-                    name = _norm_lang_label(text)   # ту же утилиту можно скопировать сюда или импортнуть
+                    name = _norm_lang_label(text_in)   # ту же утилиту можно скопировать сюда или импортнуть
                     replace_draft(s, user.id, parent_key="skills", step_key="skills_langs__tmp_name", value=name)
                     s.commit()
                     # просим выбрать уровень
                     return user.id, "__ask_level_for_custom_lang__", None, name
-
-                save_answer(s, user.id, free_qkey, text)
+            
+                save_answer(s, user.id, free_qkey, text_in)
                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
                 return user.id, next_key, None, free_qkey
 
             awaiting_step = pop_personal_wait(s, user.id)
             if awaiting_step:
-                parts = [p.strip() for p in re.split(r"[,\n;]+", text) if p.strip()]
-                human = ", ".join(parts) if parts else text
+                parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
+                human = ", ".join(parts) if parts else text_in
 
                 if awaiting_step.startswith("summary_"):
                     replace_draft(s, user.id, parent_key="summary", step_key=awaiting_step, value=human)
@@ -391,31 +405,60 @@ async def handle_answer(message: Message):
                     return user.id, "__continue_skills__", None, awaiting_step
 
             current_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+            # защита длины для target_position
+            if current_key == "target_position" and len(text_in) > TRGT_POSITION_MAX:
+                return user.id, None, "target_too_long", None
+
+            if current_key in ("full_name", "contact_phone", "contact_email", "contact_links"):
+                ok, normalized, err, hint = validate_field(current_key, text_in)
+                if not ok:
+                    return user.id, None, "bad_input", hint  # хинт отдадим наружу
+                text_to_save = normalized
+            else:
+                text_to_save = text_in
 
             # ▶ Если мы на шаге summary — это ответ на ТЕКУЩИЙ подвопрос
             if current_key == "summary":
                 idx = drafts_count(s, user.id, "summary")
                 if idx < len(SUMMARY_STEPS):
                     step_key, _ = SUMMARY_STEPS[idx]
-                    add_draft(s, user.id, "summary", step_key, text)
+                    add_draft(s, user.id, "summary", step_key, text_to_save)
                     s.commit()
                     return user.id, "summary_step_saved", None, step_key
 
             # ♦ Иначе обычное сохранение
             if not current_key:
                 return user.id, None, "done", None
-            save_answer(s, user.id, current_key, text)
+            save_answer(s, user.id, current_key, text_to_save)
             next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
             return user.id, next_key, None, current_key
 
-    user_id, next_key, error, just_answered_key = await asyncio.to_thread(_work)
+    # user_id, next_key, error, just_answered_key = await asyncio.to_thread(_work)
+    user_id, next_key, error, payload = await asyncio.to_thread(_work, raw_text)
 
+    # ---------- обработка ошибок из _work ----------
     if error == "no_user":
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
+    if error == "target_too_long":
+        await message.answer(
+            f"💡 Название должности немного длинное. Давай уложим его в {TRGT_POSITION_MAX} символов.\n"
+            f"Например: «Product Manager», «Архитектор»."
+        )
+        return
+    if error == "exp_title_too_long":
+        await message.answer(
+            f"💡 Должность в опыте получилась длинной. Нужно до {EXP_POSITION_MAX} символов.\n"
+            f"Примеры: «QA», «Бариста», «Аналитик»."
+        )
+        return
+    if error == "bad_input":
+        await message.answer(payload)
+        return
 
     # 🔔 ХУК: только что ответили на target_position → запускаем фон
-    if just_answered_key == "target_position":
+    # if just_answered_key == "target_position":
+    if not error and payload == "target_position":
         asyncio.create_task(chain_generate_after_position(user_id))
 
     if next_key == "summary_step_saved":
@@ -425,7 +468,7 @@ async def handle_answer(message: Message):
     if isinstance(next_key, str) and next_key.startswith("__experience_title_saved__"):
         parent = next_key.split(":", 1)[1]         # exp1/exp2
         exp_index = int(parent.replace("exp", "") or "1")
-        title_text = just_answered_key or ""
+        title_text = payload or ""
         # 🔔 ХУК: генерация задач для опыта работы
         asyncio.create_task(generate_experience_bundle(user_id, title_text))
         asyncio.create_task(generate_experience_achievements_examples(user_id, title_text))
@@ -460,7 +503,7 @@ async def handle_answer(message: Message):
         return
     
     if next_key == "__ask_level_for_custom_lang__":
-        await message.answer(f"Язык: {just_answered_key}\nТеперь выбери уровень:")
+        await message.answer(f"Язык: {payload or ''}\nТеперь выбери уровень:")
         await bot.send_message(message.chat.id, "Уровень владения:", reply_markup=lang_levels_custom_kb())
         return
 
