@@ -1,6 +1,9 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
-from _database import User, Answer, Order, PaynetStatus, ProcessedData, Draft
+from _database import (
+    User, Answer, Order, PaynetStatus,
+    ProcessedData, Draft, AnswerOption
+    )
 
 
 # ========================
@@ -74,6 +77,12 @@ def clear_user_drafts(session: Session, user_id: int) -> None:
                .delete(synchronize_session=False)
         session.delete(o)
     session.commit()
+
+def clear_user_answer_options(session: Session, user_id: int) -> int:
+    deleted = session.query(AnswerOption).filter(AnswerOption.user_id == user_id)\
+        .delete(synchronize_session=False)
+    session.commit()
+    return deleted
 
 
 

@@ -6,17 +6,12 @@ from aiogram.types import Message, CallbackQuery
 from sqlalchemy.orm import Session
 
 from handlers.db_helpers import (
-    get_or_create_user, 
-    get_first_unanswered, 
+    get_or_create_user, get_first_unanswered, get_drafts_values_ordered,
     save_answer, 
-    clear_user_answers, 
-    clear_user_drafts, 
+    clear_user_answers, clear_user_drafts, clear_user_answer_options,
     clear_parent_drafts, 
-    drafts_count,
-    get_drafts_values_ordered,
     drafts_completed_count,
-    add_draft,
-    replace_draft,
+    drafts_count, add_draft, replace_draft,
     pop_personal_wait,
     set_personal_wait,
     pop_free_wait,
@@ -28,8 +23,6 @@ from handlers.bot_app import bot
 from handlers.options_repo import get_options, get_label_for, normalize_position, get_user_context
 from handlers.ai_options import (
     chain_generate_after_position,
-    generate_experience_tasks_options,
-    generate_experience_achievements_examples,
     generate_experience_bundle)
 
 from _database import engine, User
@@ -177,7 +170,8 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
     elif pairs:
         allow_personal = qkey in SUMMARY_SINGLE_WITH_PERSONAL
         markup = single_select_kb(qkey, pairs, allow_personal=allow_personal, per_row=1)
-    elif qkey == "job_description":
+    # elif qkey == "job_description":
+    elif qkey in ("job_description", "contact_links"):
         markup = text_or_skip_keyboard(qkey)
 
     await bot.send_message(chat_id, PROMPTS[qkey], reply_markup=markup)
@@ -194,6 +188,39 @@ async def handle_choice(callback: CallbackQuery):
     key, value = rest.rsplit(":", 1)
 
     tg_id = callback.from_user.id
+
+    # обработка кнопки «Пропустить»
+    if key == "skip":
+        skip_key = value  # какой шаг пропускаем (напр. "contact_links")
+
+        def _work_skip():
+            with Session(engine) as s:
+                user = s.query(User).filter_by(telegram_id=tg_id).first()
+                if not user:
+                    return None, None, "no_user"
+                # помечаем шаг как пройденный пустым значением
+                save_answer(s, user.id, skip_key, "")
+                next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+                return user.id, next_key, None
+
+        user_id, next_key, error = await asyncio.to_thread(_work_skip)
+
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception as e:
+            logger.debug("edit_reply_markup skip: %s", e)
+
+        if error == "no_user":
+            await callback.message.answer("Напишите /start сначала, пожалуйста.")
+            return
+
+        if next_key:
+            await send_next_with_intro(callback.message.chat.id, next_key, user_id)
+        else:
+            await callback.message.answer("Спасибо! Всё заполнено.")
+            await create_order_and_run_ai(callback.message, user_id)
+        return
+
 
     def _work():
         with Session(engine) as s:
@@ -395,6 +422,12 @@ async def handle_answer(message: Message):
                     s.commit()
                     # просим выбрать уровень
                     return user.id, "__ask_level_for_custom_lang__", None, name
+
+                if free_qkey in ("full_name", "contact_phone", "contact_email", "contact_links"):
+                    ok, normalized, err, hint = validate_field(free_qkey, text_in)
+                    if not ok:
+                        return user.id, None, "bad_input", hint
+                    text_in = normalized
             
                 save_answer(s, user.id, free_qkey, text_in)
                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
@@ -544,6 +577,7 @@ async def new_interview_handler(message: Message):
                 return None, 0
             deleted = clear_user_answers(s, user.id)
             clear_user_drafts(s, user.id)
+            clear_user_answer_options(s, user.id)
             return user.id, deleted
 
     user_db_id, _ = await asyncio.to_thread(_reset)
@@ -798,7 +832,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
             "5️⃣ Достижения — пришли 1–2.\n\n"
             "Формула: действие + метрика + период + за счёт + эффект.\n"
             "Вопросы: сколько? за какой срок? как сделал?\n\n"
-            + (f"Примеры для роли «{role or role_norm or 'ваша роль'}»:\n" if (role or role_norm) else "Примеры:\n")
+            + (f"Примеры для твоей роли «{role or role_norm or 'ваша роль'}»:\n" if (role or role_norm) else "Примеры:\n")
             + examples_text
         )
         await bot.send_message(chat_id, text)
