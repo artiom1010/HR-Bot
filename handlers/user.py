@@ -26,7 +26,7 @@ from handlers.db_helpers import (
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
 from handlers.options_repo import get_options, get_label_for, normalize_position, get_user_context
-from handlers.ai_tasks import (
+from handlers.ai_options import (
     chain_generate_after_position,
     generate_experience_tasks_options,
     generate_experience_achievements_examples,
@@ -75,6 +75,7 @@ MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks", "ski
 PAUSE_BEFORE = {"summary", "experience", "skills"}
 
 WORD_LIMIT = 100
+JOB_DESC_WORD_LIMIT = 10000
 TRGT_POSITION_MAX = 50
 EXP_POSITION_MAX  = 50
 
@@ -248,7 +249,6 @@ async def handle_choice(callback: CallbackQuery):
         exp_index = int(parent.replace("exp", "") or "1")
         # 🔔 ХУК: генерация задач для опыта работы
         asyncio.create_task(generate_experience_bundle(user_id, echo_label))
-        asyncio.create_task(generate_experience_achievements_examples(user_id, echo_label))
         await ask_next_experience_step(callback.message.chat.id, user_id, exp_index=exp_index)
         return
 
@@ -315,16 +315,16 @@ async def handle_start(callback: CallbackQuery):
 async def handle_non_text(message: Message):
     await message.answer("Я пока понимаю только текст 😊 Пришли, пожалуйста, текстом.")
 
+def _limit_for_key(step_key: str | None) -> int:
+    if not step_key:
+        return WORD_LIMIT
+    base = step_key.split("::", 1)[1] if "::" in step_key else step_key
+    return JOB_DESC_WORD_LIMIT if base == "job_description" else WORD_LIMIT
 
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_answer(message: Message):
     tg_id = message.from_user.id
-    # text = message.text.strip()
     raw_text = (message.text or "").strip()
-
-    if _too_many_words(raw_text, WORD_LIMIT):
-        await message.answer(f"💡 Текст получился длинноватым. Попробуй сократить до {WORD_LIMIT} слов 🙂")
-        return
 
     def _work(text_in: str):
         with Session(engine) as s:
@@ -333,6 +333,17 @@ async def handle_answer(message: Message):
                 return None, None, "no_user", None
 
             free_qkey = pop_free_wait(s, user.id)
+            awaiting_step = pop_personal_wait(s, user.id)
+            step_for_limit = (
+                free_qkey or 
+                awaiting_step or 
+                get_first_unanswered(s, user.id, QUESTION_FLOW)
+                )
+
+            lim = _limit_for_key(step_for_limit)
+            if _too_many_words(text_in, lim):
+                return user.id, None, "too_many_words", lim
+
             if free_qkey:
                 if free_qkey.startswith("exp") and "::" in free_qkey:
                     parent, step = free_qkey.split("::", 1)
@@ -408,6 +419,10 @@ async def handle_answer(message: Message):
             # защита длины для target_position
             if current_key == "target_position" and len(text_in) > TRGT_POSITION_MAX:
                 return user.id, None, "target_too_long", None
+            
+            word_limit = JOB_DESC_WORD_LIMIT if current_key == "job_description" else WORD_LIMIT
+            if _too_many_words(text_in, word_limit):
+                return user.id, None, "too_many_words", word_limit
 
             if current_key in ("full_name", "contact_phone", "contact_email", "contact_links"):
                 ok, normalized, err, hint = validate_field(current_key, text_in)
@@ -433,8 +448,11 @@ async def handle_answer(message: Message):
             next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
             return user.id, next_key, None, current_key
 
-    # user_id, next_key, error, just_answered_key = await asyncio.to_thread(_work)
     user_id, next_key, error, payload = await asyncio.to_thread(_work, raw_text)
+
+    if error == "too_many_words":
+        await message.answer(f"💡 Сообщение длинновато. Давай уложимся в {payload} слов 🙂")
+        return
 
     # ---------- обработка ошибок из _work ----------
     if error == "no_user":
@@ -457,7 +475,6 @@ async def handle_answer(message: Message):
         return
 
     # 🔔 ХУК: только что ответили на target_position → запускаем фон
-    # if just_answered_key == "target_position":
     if not error and payload == "target_position":
         asyncio.create_task(chain_generate_after_position(user_id))
 
@@ -471,7 +488,6 @@ async def handle_answer(message: Message):
         title_text = payload or ""
         # 🔔 ХУК: генерация задач для опыта работы
         asyncio.create_task(generate_experience_bundle(user_id, title_text))
-        asyncio.create_task(generate_experience_achievements_examples(user_id, title_text))
         await ask_next_experience_step(message.chat.id, user_id, exp_index=exp_index)
         return
 
