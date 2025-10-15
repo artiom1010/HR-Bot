@@ -129,7 +129,7 @@ def courses_kb() -> InlineKeyboardMarkup:
 
 def text_or_skip_keyboard(key: str):
     kb = InlineKeyboardBuilder()
-    kb.button(text="📤 Отправить вакансию", callback_data=f"flow:ask:{key}")
+    kb.button(text="📤 Отправить вариант", callback_data=f"flow:ask:{key}")
     kb.button(text="⏭ Пропустить",       callback_data=f"flow:skip:{key}")
     kb.adjust(2)
     return kb.as_markup()
