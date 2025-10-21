@@ -47,7 +47,8 @@ from _utils import (
     EDUCATION_STEPS, EDUCATION_INTRO,
     COURSES_INTRO, COURSES_ASK_TEXT,
     SKILLS_MSG_HARD, SKILLS_MSG_TOOLS, 
-    LANGS_MSG, LANG_LIST, LANG_LEVELS)
+    LANGS_MSG, LANG_LIST, LANG_LEVELS,
+    PERSONAL_MESSAGE_POSITION)
 
 from handlers.ms_repo import (
     get_selected_set, 
@@ -71,6 +72,17 @@ WORD_LIMIT = 100
 JOB_DESC_WORD_LIMIT = 10000
 TRGT_POSITION_MAX = 50
 EXP_POSITION_MAX  = 50
+
+
+
+PERSONAL_FOR_KEYS = {"experience_title", "summary_industry"}
+
+def personal_msg_for(qkey: str) -> str:
+    t = (qkey or "").strip()
+    base = t.split("::", 1)[-1]
+    if base in PERSONAL_FOR_KEYS or any(k in t for k in PERSONAL_FOR_KEYS):
+        return PERSONAL_MESSAGE_POSITION
+    return PERSONAL_MESSAGE  
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -166,6 +178,7 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
             with Session(engine) as s:
                 return get_selected_set(s, user_id, qkey)
         selected = await asyncio.to_thread(_sel)
+        pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
         markup = build_multiselect_kb(qkey, pairs, selected)
     elif pairs:
         allow_personal = qkey in SUMMARY_SINGLE_WITH_PERSONAL
@@ -217,7 +230,7 @@ async def handle_choice(callback: CallbackQuery):
         if next_key:
             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
         else:
-            await callback.message.answer("Спасибо! Всё заполнено.")
+            await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
             await create_order_and_run_ai(callback.message, user_id)
         return
 
@@ -286,7 +299,7 @@ async def handle_choice(callback: CallbackQuery):
     if next_key:
         await send_next_with_intro(callback.message.chat.id, next_key, user_id)
     else:
-        await callback.message.answer("Спасибо! Всё заполнено.")
+        await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
         await create_order_and_run_ai(callback.message, user_id)
 
 
@@ -613,16 +626,17 @@ async def handle_flow(callback: CallbackQuery):
             with Session(engine) as s:
                 user = s.query(User).filter_by(telegram_id=tg_id).first()
                 if not user:
-                    return None
+                    return None, None
                 wait_key = "courses::course_item" if key == "courses" else key
                 set_free_wait(s, user.id, wait_key)
                 s.commit()
-                return user.id
-        user_id = await asyncio.to_thread(_mark_wait)
+                return user.id, wait_key
+        user_id, wait_key = await asyncio.to_thread(_mark_wait)
         if not user_id:
             await callback.message.answer("Сначала /start.")
             return
-        await callback.message.answer(COURSES_ASK_TEXT if key == "courses" else PERSONAL_MESSAGE)
+        msg = COURSES_ASK_TEXT if key == "courses" else personal_msg_for(wait_key)
+        await callback.message.answer(msg)
         return
 
     if action == "skip":
@@ -656,7 +670,7 @@ async def handle_flow(callback: CallbackQuery):
         if next_key:
             await send_next_with_intro(chat_id, next_key, user_id)
         else:
-            await callback.message.answer("Спасибо! Всё заполнено.")
+            await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
             await create_order_and_run_ai(callback.message, user_id)
 
 
@@ -832,7 +846,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
             "5️⃣ Достижения — пришли 1–2.\n\n"
             "Формула: действие + метрика + период + за счёт + эффект.\n"
             "Вопросы: сколько? за какой срок? как сделал?\n\n"
-            + (f"Примеры для твоей роли «{role or role_norm or 'ваша роль'}»:\n" if (role or role_norm) else "Примеры:\n")
+            + (f"Примеры для твоей роли «{role or role_norm or 'ваша роль'}»:\n" if (role or role_norm) else "Примеры:\n")
             + examples_text
         )
         await bot.send_message(chat_id, text)
@@ -1128,73 +1142,6 @@ def _upsert_lang_pair(s: Session, user_id: int, lang_label: str, lvl_label: str)
     return new_text
 
 
-# @router.callback_query(F.data.startswith("lang:"))
-# async def handle_lang(callback: CallbackQuery):
-#     await callback.answer()
-#     chat_id = callback.message.chat.id
-#     tg_id = callback.from_user.id
-
-#     def _get_ids():
-#         with Session(engine) as s:
-#             u = s.query(User).filter_by(telegram_id=tg_id).first()
-#             return (u.id if u else None)
-#     user_id = await asyncio.to_thread(_get_ids)
-#     if not user_id:
-#         await callback.message.answer("Сначала /start.")
-#         return
-
-#     try:
-#         _, action, *rest = callback.data.split(":")
-#     except ValueError:
-#         return
-
-#     # UI-переходы
-#     if action == "add":
-#         await callback.message.edit_reply_markup(reply_markup=lang_choose_kb())
-#         return
-#     if action == "back":
-#         await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
-#         return
-#     if action == "pick":
-#         code = rest[0]
-#         await callback.message.edit_reply_markup(reply_markup=lang_levels_kb(code))
-#         return
-
-#     # Выбор уровня → записать/обновить в drafts
-#     if action == "level":
-#         code, lvl_code = rest[0], rest[1]
-#         # получить читабельные лейблы
-#         lang_label = dict(LANG_LIST).get(code, code)
-#         lvl_label  = dict(LANG_LEVELS).get(lvl_code, lvl_code)
-
-#         pair = f"{lang_label} – {lvl_label}"
-
-#         def _save_pair():
-#             with Session(engine) as s:
-#                 # берём текущее значение (строка вида "Русский – Native // Английский – Advanced")
-#                 cur = get_draft_value(s, user_id, "skills", "skills_langs") or ""
-#                 # превращаем в словарь { "Русский": "Native", ... } чтобы обновлять без дублей
-#                 items = {}
-#                 for ch in [p.strip() for p in cur.split("//") if p.strip()]:
-#                     if " – " in ch:
-#                         lng, lvl = ch.split(" – ", 1)
-#                         items[lng.strip()] = lvl.strip()
-#                 items[lang_label] = lvl_label  # upsert
-#                 new_text = " // ".join([f"{k} – {v}" for k, v in items.items()])
-#                 replace_draft(s, user_id, "skills", "skills_langs", new_text)
-#                 s.commit()
-#                 return new_text
-
-#         new_text = await asyncio.to_thread(_save_pair)
-#         await callback.message.answer(f"✅ Добавил: {pair}")
-#         await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
-#         return
-
-#     # Завершение/пропуск языков
-#     if action in {"done", "skip"}:
-#         await callback.message.edit_reply_markup(reply_markup=None)
-#         await finalize_skills_and_go_next(chat_id, user_id)
-#         return
 @router.callback_query(F.data.startswith("lang:"))
 async def handle_lang(callback: CallbackQuery):
     await callback.answer()
@@ -1334,7 +1281,7 @@ async def handle_free(callback: CallbackQuery):
     except Exception:
         pass
 
-    await callback.message.answer(PERSONAL_MESSAGE)
+    await callback.message.answer(personal_msg_for(qkey))
 
 
 
@@ -1350,6 +1297,13 @@ def _lock_for(chat_id: int) -> asyncio.Lock:
     if chat_id not in _chat_locks:
         _chat_locks[chat_id] = asyncio.Lock()
     return _chat_locks[chat_id]
+
+BUTTON_TEXT_MAX = 64
+BTN_PREFIX = "☐ "
+KB_OVERHEAD = len(BTN_PREFIX)
+
+def _fits_keyboard_label(label: str) -> bool:
+    return len(label or "") <= (BUTTON_TEXT_MAX - KB_OVERHEAD)
 
 @router.callback_query(F.data.startswith("ms:"))
 async def handle_multiselect(callback: CallbackQuery):
@@ -1442,7 +1396,8 @@ async def handle_multiselect(callback: CallbackQuery):
                 await callback.message.edit_reply_markup(reply_markup=None)
             except Exception as e:
                 logger.debug("edit_reply_markup skip: %s", e)
-            await callback.message.answer(PERSONAL_MESSAGE)
+            msg = personal_msg_for(qkey)
+            await callback.message.answer(msg)
             return
 
         if action in {"toggle", "reset"}:
@@ -1458,6 +1413,7 @@ async def handle_multiselect(callback: CallbackQuery):
                 role_for_exp = await asyncio.to_thread(_role)
             role_for_exp_norm = normalize_position(role_for_exp)
             pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, role_for_exp_norm)
+            pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
             pairs = pairs or []
             markup = build_multiselect_kb(qkey, pairs, payload or set())
             try:
@@ -1482,6 +1438,7 @@ async def handle_multiselect(callback: CallbackQuery):
                 role_for_exp_norm = normalize_position(role_for_exp)
 
                 pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, role_for_exp_norm)
+                pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
                 def _sel():
                     with Session(engine) as s:
                         return get_selected_set(s, user_id, qkey)

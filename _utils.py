@@ -283,6 +283,7 @@ PERSONAL_MESSAGE = """
 🔖 Отправь свои вариант(ы) через запятую или с новой строки:
 """
 
+PERSONAL_MESSAGE_POSITION = "🖊 Напиши свой вариант:"
 
 # =========================
 # QUESTION_FLOW
@@ -341,5 +342,6 @@ QUESTION_FLOW = [
     ),
     ("contact_phone",   "📞 Твой номер телефона:"),
     ("contact_email",   "✉️ Твой e-mail для связи:"),
-    ("contact_links",   "🔗 Ссылки (LinkedIn, GitHub и т.п.), через запятую:"),
+    ("contact_links",   "🔗 Ссылки (LinkedIn, GitHub и т.п.), через запятую.\n\nЕсли ссылок нет – нажми кнопку «Пропустить»."),
+    ("test_step",   "✉️ ТЕСТ")
 ]
