@@ -48,7 +48,7 @@ from _utils import (
     COURSES_INTRO, COURSES_ASK_TEXT,
     SKILLS_MSG_HARD, SKILLS_MSG_TOOLS, 
     LANGS_MSG, LANG_LIST, LANG_LEVELS,
-    PERSONAL_MESSAGE_POSITION)
+    PERSONAL_MESSAGE_POSITION, USE_KEYBOARD_MSG)
 
 from handlers.ms_repo import (
     get_selected_set, 
@@ -75,6 +75,43 @@ EXP_POSITION_MAX  = 50
 
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Gate
+# ──────────────────────────────────────────────────────────────────────────────
+BUTTON_TEXT_STEPS = {"job_description", "contact_links"}  # тут всё, что точно текстом
+def _is_button_step(session: Session, user_id: int, qkey: str) -> bool:
+    if not qkey:
+        return False
+    base = qkey.split("::", 1)[1] if "::" in qkey else qkey
+    if base in BUTTON_TEXT_STEPS:
+        return False
+    if base in MULTI_SELECT_KEYS or base.startswith("summary_"):
+        return True
+    pairs = get_options(base, user_id, None, None)
+    return bool(pairs)
+
+
+
+_text_gate: dict[int, str] = {}
+
+def open_text_gate(user_id: int, key: str) -> None:
+    _text_gate[user_id] = key
+
+def close_text_gate(user_id: int) -> None:
+    _text_gate.pop(user_id, None)
+
+def gate_for(user_id: int) -> str | None:
+    return _text_gate.get(user_id)
+
+KEYBOARD_ONLY_MSG = "Пожалуйста, используй кнопки под сообщением."
+
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Утилиты
+# ──────────────────────────────────────────────────────────────────────────────
+
 PERSONAL_FOR_KEYS = {"experience_title", "summary_industry"}
 
 def personal_msg_for(qkey: str) -> str:
@@ -82,7 +119,7 @@ def personal_msg_for(qkey: str) -> str:
     base = t.split("::", 1)[-1]
     if base in PERSONAL_FOR_KEYS or any(k in t for k in PERSONAL_FOR_KEYS):
         return PERSONAL_MESSAGE_POSITION
-    return PERSONAL_MESSAGE  
+    return PERSONAL_MESSAGE
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -92,6 +129,8 @@ async def send_next_with_intro(chat_id: int, next_key: str, user_id: int | None 
     intro = INTRO_BEFORE.get(next_key)
     if intro and next_key in PAUSE_BEFORE:
         await bot.send_message(chat_id, intro, reply_markup=continue_kb(next_key))
+        if user_id:
+            open_text_gate(user_id, f"intro:{next_key}")
         return
     if intro:
         await bot.send_message(chat_id, intro)
@@ -172,6 +211,12 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
     pairs = await asyncio.to_thread(get_options, qkey, user_id, None, None)
     
     markup = None
+    if markup is not None:
+        await bot.send_message(chat_id, PROMPTS[qkey], reply_markup=markup)
+        if user_id and qkey not in ("job_description", "contact_links"):
+            open_text_gate(user_id, qkey)
+        return
+
     if qkey in MULTI_SELECT_KEYS and user_id and pairs:
         # вытягиваем выбранные value из БД
         def _sel():
@@ -217,6 +262,8 @@ async def handle_choice(callback: CallbackQuery):
                 return user.id, next_key, None
 
         user_id, next_key, error = await asyncio.to_thread(_work_skip)
+        if user_id:
+            close_text_gate(user_id)
 
         try:
             await callback.message.edit_reply_markup(reply_markup=None)
@@ -271,6 +318,8 @@ async def handle_choice(callback: CallbackQuery):
             return user.id, next_key, None, label
 
     user_id, next_key, error, echo_label = await asyncio.to_thread(_work)
+    if user_id:
+        close_text_gate(user_id)
 
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
@@ -374,6 +423,11 @@ async def handle_answer(message: Message):
 
             free_qkey = pop_free_wait(s, user.id)
             awaiting_step = pop_personal_wait(s, user.id)
+
+            if not free_qkey and not awaiting_step:
+                if gate_for(user.id):
+                    return user.id, None, "keyboard_only", gate_for(user.id)
+
             step_for_limit = (
                 free_qkey or 
                 awaiting_step or 
@@ -462,6 +516,11 @@ async def handle_answer(message: Message):
                     return user.id, "__continue_skills__", None, awaiting_step
 
             current_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+
+            # если сейчас шаг кнопочный, а мы НЕ ждём текст — блокируем текстовый ввод
+            if (not free_qkey) and (not awaiting_step) and _is_button_step(s, user.id, current_key):
+                return user.id, current_key, "need_button", None
+
             # защита длины для target_position
             if current_key == "target_position" and len(text_in) > TRGT_POSITION_MAX:
                 return user.id, None, "target_too_long", None
@@ -495,6 +554,15 @@ async def handle_answer(message: Message):
             return user.id, next_key, None, current_key
 
     user_id, next_key, error, payload = await asyncio.to_thread(_work, raw_text)
+
+    if error == "keyboard_only":
+        await message.answer(KEYBOARD_ONLY_MSG)
+        return
+    
+    if error == "need_button":
+        await message.answer(USE_KEYBOARD_MSG)
+        await send_question(message.chat.id, next_key, user_id)
+        return
 
     if error == "too_many_words":
         await message.answer(f"💡 Сообщение длинновато. Давай уложимся в {payload} слов 🙂")
@@ -635,6 +703,7 @@ async def handle_flow(callback: CallbackQuery):
         if not user_id:
             await callback.message.answer("Сначала /start.")
             return
+        close_text_gate(user_id) 
         msg = COURSES_ASK_TEXT if key == "courses" else personal_msg_for(wait_key)
         await callback.message.answer(msg)
         return
@@ -666,7 +735,8 @@ async def handle_flow(callback: CallbackQuery):
             await callback.message.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
-        # await callback.message.answer("Пропущено.")
+        
+        close_text_gate(user_id)
         if next_key:
             await send_next_with_intro(chat_id, next_key, user_id)
         else:
@@ -721,11 +791,13 @@ async def ask_next_summary_step(chat_id: int, user_id: int):
             selected = await asyncio.to_thread(_sel)
             markup = build_multiselect_kb(step_key, pairs, selected)
             await bot.send_message(chat_id, prompt, reply_markup=markup)
+            open_text_gate(user_id, step_key)
             return
 
         allow_personal = step_key in SUMMARY_SINGLE_WITH_PERSONAL
         markup = single_select_kb(step_key, pairs, allow_personal=allow_personal, per_row=1)
         await bot.send_message(chat_id, prompt, reply_markup=markup)
+        open_text_gate(user_id, step_key)
         return
     await finalize_summary_and_go_next(chat_id, user_id)
 
@@ -778,6 +850,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
                 set_free_wait(s, user_id, f"{parent}::{step_key}")
                 s.commit()
         await asyncio.to_thread(_mark)
+        close_text_gate(user_id)
         await bot.send_message(chat_id, prompt)
         return
 
@@ -785,6 +858,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
         pairs = await asyncio.to_thread(get_options, "experience_title", user_id, None, None)
         markup = single_select_kb(f"{parent}::{step_key}", pairs, allow_personal=True, per_row=1)
         await bot.send_message(chat_id, prompt, reply_markup=markup)
+        open_text_gate(user_id, f"{parent}::{step_key}")
         return
 
     if step_key == "experience_period":
@@ -793,6 +867,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
                 set_free_wait(s, user_id, f"{parent}::{step_key}")
                 s.commit()
         await asyncio.to_thread(_mark)
+        close_text_gate(user_id)
         await bot.send_message(chat_id, prompt)
         return
 
@@ -814,6 +889,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
 
         markup = build_multiselect_kb(f"{parent}::{step_key}", pairs, selected)
         await bot.send_message(chat_id, prompt, reply_markup=markup)
+        open_text_gate(user_id, f"{parent}::{step_key}")
         return
     
     if step_key == "experience_achievements":
@@ -822,6 +898,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
                 set_free_wait(s, user_id, f"{parent}::{step_key}")
                 s.commit()
         await asyncio.to_thread(_mark)
+        close_text_gate(user_id)  
 
         def _role():
             with Session(engine) as s:
@@ -1069,11 +1146,13 @@ async def ask_next_skills_step(chat_id: int, user_id: int):
             selected = await asyncio.to_thread(_sel)
             markup = build_multiselect_kb(step_key, pairs, selected)
             await bot.send_message(chat_id, prompt, reply_markup=markup)
+            open_text_gate(user_id, step_key)
             return
 
         # 3 шаг — языки
         if step_key == "skills_langs":
             await bot.send_message(chat_id, prompt, reply_markup=lang_actions_kb())
+            open_text_gate(user_id, step_key)
             return
 
     await finalize_skills_and_go_next(chat_id, user_id)
@@ -1397,6 +1476,7 @@ async def handle_multiselect(callback: CallbackQuery):
             except Exception as e:
                 logger.debug("edit_reply_markup skip: %s", e)
             msg = personal_msg_for(qkey)
+            close_text_gate(user_id)
             await callback.message.answer(msg)
             return
 
@@ -1452,6 +1532,7 @@ async def handle_multiselect(callback: CallbackQuery):
                 return
             # 2) а вот ТЕПЕРЬ, когда точно не пусто — снимаем клавиатуру
             await callback.message.edit_reply_markup(reply_markup=None)
+            close_text_gate(user_id)
 
             if echo_text:
                 await callback.message.answer(f"🌟 Готово! Сохранил вариант(ы): {echo_text}")

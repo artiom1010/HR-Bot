@@ -61,14 +61,14 @@ CHOICES = {
         ("summary_tasks_doc", "Заполнение документации") 
     ],
     "summary_values": [
-        ("summary_values_orient", "Ориентация на результат и командную работу"), 
-        ("summary_values_trust", "Честность и прозрачность"), 
-        ("summary_values_develop", "Постоянное развитие"), 
-        ("summary_values_customer", "Клиентоориентированность"),
-        ("summary_values_ownership", "Личная ответственность и дисциплина"),
-        ("summary_values_initiative", "Инициативность и проактивность"),
-        ("summary_values_adapt", "Гибкость и адаптивность"),
-        ("summary_values_quality", "Качество и внимание к деталям")
+        ("summary_values_orient", "HR-стратегия"), 
+        ("summary_values_trust", "Организационная структура и дизайн команд"), 
+        ("summary_values_develop", "KPI / OKR, Performance Management, 360 Review"), 
+        ("summary_values_customer", "Мотивация и бенефиты, грейдинг"),
+        ("summary_values_ownership", "Employer Branding"),
+        ("summary_values_initiative", "HR-аналитика"),
+        ("summary_values_adapt", "HRIS / HRM-системы"),
+        ("summary_values_quality", "Автоматизация HR-процессов")
     ],
     "experience_title": [
         ("experience_position_sales", "Менеджер по продажам"), 
@@ -116,7 +116,7 @@ SUMMARY_STEPS = [
     ("summary_industry",   "1️⃣ В какой сфере ты работаешь?"),
     ("summary_experience", "2️⃣ Сколько лет опыта у тебя?"),
     ("summary_tasks",      "3️⃣ С какими задачами ты справляешься лучше всего?\nМожешь выбрать из вариантов или написать свой текст."),
-    ("summary_values",     "4️⃣ Какие ценности и подход ты применяешь в работе?"),
+    ("summary_values",     "4️⃣ Какими навыками ты обладаешь (хард-скиллы)?"),
 ]
 
 INTRO_BEFORE = {
@@ -284,6 +284,11 @@ PERSONAL_MESSAGE = """
 """
 
 PERSONAL_MESSAGE_POSITION = "🖊 Напиши свой вариант:"
+
+
+USE_KEYBOARD_MSG = """
+Пожалуйста, используй кнопки чтобы общаться со мной.
+"""
 
 # =========================
 # QUESTION_FLOW
