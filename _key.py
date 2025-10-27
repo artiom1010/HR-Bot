@@ -145,12 +145,18 @@ def build_multiselect_kb(qkey: str, pairs: List[Tuple[str, str]], selected: Set[
         checked = "✅" if value in selected else "☐"
         kb.button(text=f"{checked} {label}", callback_data=ms_callback("toggle", qkey, value))
     kb.adjust(1)
-    kb.button(text="👤 Свой вариант", callback_data=ms_callback("personal", qkey))
+    kb.button(text="💾 Готово",    callback_data=ms_callback("done", qkey))
     kb.button(text="♻️ Сбросить", callback_data=ms_callback("reset", qkey))
-    kb.button(text="💾 Сохранить", callback_data=ms_callback("save", qkey))
+    kb.button(text="⏭ Пропустить", callback_data=ms_callback("skip", qkey))
     kb.adjust(1)
     return kb.as_markup()
 
+def add_own_kb(qkey: str):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, добавить", callback_data=f"ms:add_yes:{qkey}")
+    kb.button(text="➡️ Нет, достаточно", callback_data=f"ms:add_no:{qkey}")
+    kb.adjust(2)
+    return kb.as_markup()
 
 # ▼ универсальная клавиатура для одиночных шагов
 def single_select_kb(qkey: str, pairs: list[tuple[str, str]], *, allow_personal: bool = False, per_row: int = 1):
