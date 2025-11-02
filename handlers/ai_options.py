@@ -211,6 +211,9 @@ def _build_values_prompt(position: str) -> str:
 """.strip()
 
 
+
+
+
 # ==== experience_tasks & experience_achievements ====
 def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
     return f"""
@@ -396,6 +399,9 @@ async def generate_tasks_options(user_id: int) -> list[str] | None:
         prompt = _build_tasks_prompt(pos_norm, lang_code)
         raw    = await ask_llm(prompt)
         items  = _parse_items(raw)
+
+        for it in items:
+            it["value"] = _short_value_for_cb(it.get("value", ""), pos_norm)
 
         inserted = replace_user_ai_options(
             user_id=user_id, question_key="summary_tasks",
@@ -583,6 +589,9 @@ async def generate_experience_achievements_examples(user_id: int, role_title: st
 
         items  = _parse_examples_to_items(raw)
 
+        for it in items:
+            it["value"] = _short_value_for_cb(it.get("value", ""), role)
+
         inserted = replace_user_ai_options(
             user_id=user_id,
             question_key="experience_achievements",
@@ -634,6 +643,9 @@ async def generate_skills_hard_options(user_id: int) -> list[str] | None:
         raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
         items  = _parse_items(raw)
 
+        for it in items:
+            it["value"] = _short_value_for_cb(it.get("value", ""), pos_norm)
+
         inserted = replace_user_ai_options(
             user_id=user_id,
             question_key="skills_hard",
@@ -665,6 +677,9 @@ async def generate_skills_tools_options(user_id: int) -> list[str] | None:
         prompt = _build_skills_tools_prompt(pos_norm, lang_code)
         raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
         items  = _parse_items(raw)
+
+        for it in items:
+            it["value"] = _short_value_for_cb(it.get("value", ""), pos_norm)
 
         inserted = replace_user_ai_options(
             user_id=user_id,
