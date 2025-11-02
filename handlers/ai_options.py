@@ -188,30 +188,25 @@ def _build_tasks_prompt(position: str, lang_code: str) -> str:
 #   ...
 # ]
 # """.strip()
-def _build_values_prompt(position: str, lang_code: str) -> str:
+
+
+
+
+# ==== main skills from file  ====
+def _build_values_prompt(position: str) -> str:
     return f"""
-Ты — ретривер+форматтер для кнопок Telegram. Используй ТОЛЬКО знания, извлечённые из файла, прикреплённого в базе знаний с именем ровно: "Skills CV bot - Лист1.pdf". Ничего не выдумывай.
+ЗАДАЧА: Найти в Базе знаний точный список скиллов для профессии: "{position}".
+ОТВЕТ:
+- Пунктов всего должно быть 7-8.
+- Не переводи пукнты на другие языки, отдавай ТОЛЬКО на том языке, как указано в базе знаний!
+- "label": 35–65 символов, если больше – пропусти.
+- Если в пункте всего 1 слово, можешь скомбинировать его с соседним пунктом через /, чтобы получилось 2-3 слова.
+ЗАПРЕТ: не использовать внешние знания.
 
-ЗАДАЧА
-— Для роли "{position}" вернуть список профессиональных СКИЛЛОВ из таблицы.
-- Возьми список скиллов ИЗ ФАЙЛА ДОСЛОВНО: сохраняй регистр, порядок, пунктуацию и текст в скобках.
-
-ТРЕБОВАНИЯ К ВЫВОДУ
-- Верни СТРОГО JSON-массив из 7–8 объектов без пояснений и без бэктиков.
-- Каждый объект: {{"value":"<slug-en-kebab>","label":"<краткий скилл на {lang_code}>"}}.
-- Ограничения:
-  • value: латиница, kebab-case, 4–7 слов; отражает суть (напр. "retail-sales-technique", "objection-handling", "inventory-control").
-  • Удали дубли/синонимы; оставь 7–8 уникальных пунктов.
-- Источник только таблица: парси список скиллов из найденной строки роли (разделители: «;», «,» , «/», «—»).
-
-ПРОВЕРКИ КАЧЕСТВА
-- Не добавляй того, чего нет в контексте.
-- Язык меток (label): "{lang_code}". Если неизвестен — используй русский.
-
-ФОРМАТ ОТВЕТА (пример структуры, НЕ печатать сам пример):
+ФОРМАТ ОТВЕТА:
 [
-  {{"value":"retail-sales-technique","label":"Техника продаж"}},
-  {{"value":"objection-handling","label":"Работа с возражениями"}}
+  {{"value":"<slug-latin-kebab>","label":"[пункт из Skills CV bot]"}},
+  {{"value":"<slug-latin-kebab>","label":"[пункт из Skills CV bot]"}}
 ]
 """.strip()
 
@@ -314,12 +309,15 @@ def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
 # =========================
 # ЗАПРОС К ТВОЕМУ DO-АГЕНТУ
 # =========================
-async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) -> str:
+async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1, tag: str = "") -> str:
     """
     Шлём промпт в DO-агент и возвращаем ЧИСТЫЙ текст JSON-массива.
     - read_timeout: таймаут на чтение (сек)
     - retries: количество повторов при сетевых/парсинг-ошибках
     """
+    # ⬇️ логируем то, что реально отправляем
+    log.info("============== PROMPT TO LLM%s:\n%s", f" [{tag}]" if tag else "", prompt)
+
     if not DO_AGENT_URL:
         raise RuntimeError("DO_AGENT_URL не задан в conf.py")
 
@@ -362,6 +360,9 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1) 
             # снимаем ```json ... ``` если есть
             cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
             cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+            
+            # ⬇️ логируем то, что получаем
+            log.info("=============== PROMPT FROM LLM%s:\n%s", f" [{tag}]" if tag else "", cleaned)
             return cleaned
 
         except httpx.HTTPStatusError as e:
@@ -423,9 +424,12 @@ async def generate_values_options(user_id: int) -> list[str] | None:
         lang_code = _map_lang_code(lang_answer)
         pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
-        prompt = _build_values_prompt(pos_norm, lang_code)
+        prompt = _build_values_prompt(pos_norm)
         raw    = await ask_llm(prompt, read_timeout=75.0, retries=1)
         items  = _parse_items(raw)
+
+        for it in items:
+            it["value"] = _short_value_for_cb(it.get("value", ""), pos_norm)
 
         inserted = replace_user_ai_options(
             user_id=user_id, question_key="summary_values",
