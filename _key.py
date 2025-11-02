@@ -5,6 +5,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from _utils import LANG_LIST, LANG_LEVELS
 
+import logging
+log = logging.getLogger(__name__)
+
 def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -143,6 +146,8 @@ def build_multiselect_kb(qkey: str, pairs: List[Tuple[str, str]], selected: Set[
     kb = InlineKeyboardBuilder()
     for value, label in pairs:
         checked = "✅" if value in selected else "☐"
+        cd = ms_callback("toggle", qkey, value)
+        log.info("CB[%s] len=%d data=%r", qkey, len(cd.encode("utf-8")), cd)
         kb.button(text=f"{checked} {label}", callback_data=ms_callback("toggle", qkey, value))
     kb.adjust(1)
     kb.button(text="💾 Готово",    callback_data=ms_callback("done", qkey))
