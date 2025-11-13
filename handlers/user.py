@@ -94,16 +94,53 @@ def _is_button_step(session: Session, user_id: int, qkey: str) -> bool:
 
 _text_gate: dict[int, str] = {}
 
+import logging
+glog = logging.getLogger("gate")
+
 def open_text_gate(user_id: int, key: str) -> None:
     _text_gate[user_id] = key
+    glog.debug("gate OPEN user_id=%s key=%s", user_id, key)
 
 def close_text_gate(user_id: int) -> None:
+    if user_id in _text_gate:
+        glog.debug("gate CLOSE user_id=%s key=%s", user_id, _text_gate[user_id])
     _text_gate.pop(user_id, None)
 
 def gate_for(user_id: int) -> str | None:
     return _text_gate.get(user_id)
 
 KEYBOARD_ONLY_MSG = "Пожалуйста, используй кнопки под сообщением."
+
+
+
+
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Антиспам-таймаут для "используй кнопки"
+import time
+
+_last_warn_ts: dict[int, float] = {}
+WARN_TTL_SEC = 15
+
+def _should_warn(user_id: int) -> bool:
+    now = time.time()
+    last = _last_warn_ts.get(user_id, 0)
+    if now - last >= WARN_TTL_SEC:
+        _last_warn_ts[user_id] = now
+        return True
+    return False
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -142,10 +179,103 @@ async def send_first_question(chat_id: int, user_db_id: int):
     await send_question(chat_id, first_key, user_db_id)
 
 
+# async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
+#     PROMPTS = dict(QUESTION_FLOW)
+
+#     # ▶ Если это summary — запускаем ask_next_summary_step мини-мастер
+#     if qkey == "summary" and user_id:
+#         await bot.send_message(chat_id, PROMPTS[qkey])
+#         def _reset():
+#             with Session(engine) as s:
+#                 clear_parent_drafts(s, user_id, "summary")
+#                 s.commit()
+#         await asyncio.to_thread(_reset)
+#         await ask_next_summary_step(chat_id, user_id)
+#         return
+    
+#     # ▶ Если это experience — запускаем ask_next_experience_step мини-мастер 
+#     if qkey == "experience" and user_id:
+#         # 1) чистим старые черновики exp1 (на всякий случай)
+#         def _reset():
+#             with Session(engine) as s:
+#                 clear_parent_drafts(s, user_id, "exp1")
+#                 s.commit()
+#         await asyncio.to_thread(_reset)
+
+#         # 2) помечаем шаг "experience" как пройденный, чтобы get_first_unanswered не зацикливался
+#         def _mark_done():
+#             with Session(engine) as s:
+#                 save_answer(s, user_id, "experience", "")
+#         await asyncio.to_thread(_mark_done)
+
+#         # 3) стартуем первый подпроцесс опыта
+#         await ask_next_experience_step(chat_id, user_id, exp_index=1)
+#         return
+    
+#     # ▶ Если это education — запускаем мини-мастер образования
+#     if qkey == "education" and user_id:
+#         await bot.send_message(chat_id, EDUCATION_INTRO, reply_markup=edu_start_kb())
+#         def _mark_done():
+#             with Session(engine) as s:
+#                 save_answer(s, user_id, "education", "")
+#         await asyncio.to_thread(_mark_done)
+#         return
+    
+#     # ▶ Если это courses — просто текст с кнопками
+#     if qkey == "courses" and user_id:
+#         def _reset():
+#             with Session(engine) as s:
+#                 clear_parent_drafts(s, user_id, "courses")
+#                 s.commit()
+#         await asyncio.to_thread(_reset)
+#         def _mark_done():
+#             with Session(engine) as s:
+#                 save_answer(s, user_id, "courses", "")
+#         await asyncio.to_thread(_mark_done)
+#         await bot.send_message(chat_id, COURSES_INTRO, reply_markup=courses_kb())
+#         return
+    
+#     # ▶ Если это skills — запускаем мини-мастер навыков
+#     if qkey == "skills" and user_id:
+#         def _reset():
+#             with Session(engine) as s:
+#                 clear_parent_drafts(s, user_id, "skills")
+#                 s.commit()
+#         await asyncio.to_thread(_reset)
+#         await ask_next_skills_step(chat_id, user_id)
+#         return
+
+#     pairs = await asyncio.to_thread(get_options, qkey, user_id, None, None)
+    
+#     markup = None
+#     if markup is not None:
+#         await bot.send_message(chat_id, PROMPTS[qkey], reply_markup=markup)
+#         if user_id and qkey not in ("job_description", "contact_links"):
+#             open_text_gate(user_id, qkey)
+#         return
+
+#     if qkey in MULTI_SELECT_KEYS and user_id and pairs:
+#         # вытягиваем выбранные value из БД
+#         def _sel():
+#             with Session(engine) as s:
+#                 return get_selected_set(s, user_id, qkey)
+#         selected = await asyncio.to_thread(_sel)
+#         pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
+#         markup = build_multiselect_kb(qkey, pairs, selected)
+#     elif pairs:
+#         allow_personal = qkey in SUMMARY_SINGLE_WITH_PERSONAL
+#         markup = single_select_kb(qkey, pairs, allow_personal=allow_personal, per_row=1)
+#     # elif qkey == "job_description":
+#     elif qkey in ("job_description", "contact_links"):
+#         markup = text_or_skip_keyboard(qkey)
+
+#     await bot.send_message(chat_id, PROMPTS[qkey], reply_markup=markup)
+
+
 async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
     PROMPTS = dict(QUESTION_FLOW)
 
-    # ▶ Если это summary — запускаем ask_next_summary_step мини-мастер
+    # ▶ summary → мини-мастер
     if qkey == "summary" and user_id:
         await bot.send_message(chat_id, PROMPTS[qkey])
         def _reset():
@@ -155,36 +285,33 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
         await asyncio.to_thread(_reset)
         await ask_next_summary_step(chat_id, user_id)
         return
-    
-    # ▶ Если это experience — запускаем ask_next_experience_step мини-мастер 
+
+    # ▶ experience → мини-мастер
     if qkey == "experience" and user_id:
-        # 1) чистим старые черновики exp1 (на всякий случай)
         def _reset():
             with Session(engine) as s:
                 clear_parent_drafts(s, user_id, "exp1")
                 s.commit()
         await asyncio.to_thread(_reset)
-
-        # 2) помечаем шаг "experience" как пройденный, чтобы get_first_unanswered не зацикливался
         def _mark_done():
             with Session(engine) as s:
                 save_answer(s, user_id, "experience", "")
         await asyncio.to_thread(_mark_done)
-
-        # 3) стартуем первый подпроцесс опыта
         await ask_next_experience_step(chat_id, user_id, exp_index=1)
         return
-    
-    # ▶ Если это education — запускаем мини-мастер образования
+
+    # ▶ education → старт с клавиатурой
     if qkey == "education" and user_id:
         await bot.send_message(chat_id, EDUCATION_INTRO, reply_markup=edu_start_kb())
+        # здесь клавиатура → включаем ворота
+        open_text_gate(user_id, "education")
         def _mark_done():
             with Session(engine) as s:
                 save_answer(s, user_id, "education", "")
         await asyncio.to_thread(_mark_done)
         return
-    
-    # ▶ Если это courses — просто текст с кнопками
+
+    # ▶ courses → кнопки
     if qkey == "courses" and user_id:
         def _reset():
             with Session(engine) as s:
@@ -196,9 +323,11 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
                 save_answer(s, user_id, "courses", "")
         await asyncio.to_thread(_mark_done)
         await bot.send_message(chat_id, COURSES_INTRO, reply_markup=courses_kb())
+        # здесь клавиатура → включаем ворота
+        open_text_gate(user_id, "courses")
         return
-    
-    # ▶ Если это skills — запускаем мини-мастер навыков
+
+    # ▶ skills → мини-мастер
     if qkey == "skills" and user_id:
         def _reset():
             with Session(engine) as s:
@@ -208,31 +337,45 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
         await ask_next_skills_step(chat_id, user_id)
         return
 
+    # Общий случай
     pairs = await asyncio.to_thread(get_options, qkey, user_id, None, None)
-    
     markup = None
-    if markup is not None:
-        await bot.send_message(chat_id, PROMPTS[qkey], reply_markup=markup)
-        if user_id and qkey not in ("job_description", "contact_links"):
-            open_text_gate(user_id, qkey)
-        return
 
     if qkey in MULTI_SELECT_KEYS and user_id and pairs:
-        # вытягиваем выбранные value из БД
         def _sel():
             with Session(engine) as s:
                 return get_selected_set(s, user_id, qkey)
         selected = await asyncio.to_thread(_sel)
         pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
         markup = build_multiselect_kb(qkey, pairs, selected)
+
     elif pairs:
         allow_personal = qkey in SUMMARY_SINGLE_WITH_PERSONAL
         markup = single_select_kb(qkey, pairs, allow_personal=allow_personal, per_row=1)
-    # elif qkey == "job_description":
+
     elif qkey in ("job_description", "contact_links"):
         markup = text_or_skip_keyboard(qkey)
 
     await bot.send_message(chat_id, PROMPTS[qkey], reply_markup=markup)
+
+    # ВАЖНО: если это клавиатурный шаг — включаем ворота
+    if user_id and markup:
+        # job_description/contact_links — явно текстовые, поэтому ворота не включаем
+        if qkey not in ("job_description", "contact_links"):
+            open_text_gate(user_id, qkey)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -703,6 +846,32 @@ async def handle_answer(message: Message):
     tg_id = message.from_user.id
     raw_text = (message.text or "").strip()
 
+    # 1) получаем user_id по tg_id
+    def _uid():
+        with Session(engine) as s:
+            u = s.query(User).filter_by(telegram_id=tg_id).first()
+            return u.id if u else None
+    user_id = await asyncio.to_thread(_uid)
+
+    if not user_id:
+        await message.answer("Напиши /start сначала, пожалуйста.")
+        return
+
+
+    # >>> ЖЁСТКИЙ ГАРД: если открыты ворота (ждём кнопку) — блокируем любой текст
+    gate_key = gate_for(tg_id)
+    if gate_key:
+        if _should_warn(tg_id):
+            await message.answer(KEYBOARD_ONLY_MSG)
+        def _uid():
+            with Session(engine) as s:
+                u = s.query(User).filter_by(telegram_id=tg_id).first()
+                return u.id if u else None
+        user_db_id = await asyncio.to_thread(_uid)
+        await send_question(message.chat.id, gate_key, user_db_id)
+        return
+
+
     # ------- утилиты -------
     def _merge_ms_and_free(ms_text: str, user_text: str) -> str:
         """Склеиваем выбранные пункты мультиселекта и ручной ввод пользователя."""
@@ -734,6 +903,9 @@ async def handle_answer(message: Message):
             free_qkey     = pop_free_wait(s, user.id)
             awaiting_step = pop_personal_wait(s, user.id)
             s.commit()
+
+            if free_qkey or awaiting_step:
+                close_text_gate(user.id)
 
             # если ничего не ждём и текущий шаг кнопочный — просим жать кнопки
             if not free_qkey and not awaiting_step:
@@ -770,7 +942,7 @@ async def handle_answer(message: Message):
                 replace_draft(s, user.id, parent_key=parent, step_key=step, value=human)
                 s.commit()
                 saved_marker = "__experience_title_saved__" if step == "experience_title" else "__experience_step_saved__"
-                return user.id, f"{saved_marker}:{parent}", None, step
+                return user.id, f"{saved_marker}:{parent}", None, human 
 
             # 3) summary: свой вариант (старый single-select)
             if free_qkey and free_qkey.startswith("summary_"):
@@ -889,8 +1061,13 @@ async def handle_answer(message: Message):
     if error == "no_user":
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
+    # if error == "need_button":
+        # await message.answer(USE_KEYBOARD_MSG)
+    #     await send_question(message.chat.id, next_key, user_id)
+    #     return
     if error == "need_button":
-        await message.answer(USE_KEYBOARD_MSG)
+        if _should_warn(user_id):
+            await message.answer(KEYBOARD_ONLY_MSG)
         await send_question(message.chat.id, next_key, user_id)
         return
     if error == "too_many_words":
@@ -1613,6 +1790,7 @@ async def handle_lang(callback: CallbackQuery):
             await callback.message.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
+        close_text_gate(user_id)
         await callback.message.answer("Напиши язык (например: Польский, Итальянский).")
         return
 
@@ -1708,6 +1886,7 @@ async def handle_free(callback: CallbackQuery):
     except Exception:
         pass
 
+    close_text_gate(user_id)
     await callback.message.answer(personal_msg_for(qkey))
 
 

@@ -1,4 +1,4 @@
-# handlers/ai_tasks.py
+# handlers/ai_options.py
 import os
 import re
 import json
@@ -35,18 +35,31 @@ def _slugify(text: str) -> str:
     return t[:40] or "item"
 
 
-def _clean_label(label: str, max_len: int = 50) -> str:
+def _clean_label(label: str, max_len: int = 56) -> str:
+    """
+    Очищаем и аккуратно обрезаем label:
+    - убираем переносы/кавычки;
+    - если строка длиннее max_len, режем по границе слова, а не посередине.
+    """
     lab = (label or "").replace("\n", " ").strip()
     lab = lab.strip(' "\'')
-    return lab[:max_len].strip()
+    if len(lab) <= max_len:
+        return lab
+    # грубо обрезаем и откатываемся к последнему пробелу
+    cut = lab[:max_len]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+
+    return cut.strip()
 
 
-def _ensure_unique_7_8(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
+
+def _ensure_unique_7_8(items: List[Dict[str, str]], max_len: int = 56) -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
     seen = set()
     for it in items:
         v = _slugify(it.get("value") or it.get("label", ""))
-        l = _clean_label(it.get("label", ""))
+        l = _clean_label(it.get("label", ""), max_len=max_len)
         if not l or v in seen:
             continue
         seen.add(v)
@@ -58,7 +71,8 @@ def _ensure_unique_7_8(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
     return out[:8]
 
 
-def _parse_items(raw_text: str) -> List[Dict[str, str]]:
+
+def _parse_items(raw_text: str, *, max_len: int = 56) -> List[Dict[str, str]]:
     """Принимаем строку с JSON-массивом и возвращаем нормализованный список словарей."""
     data = json.loads(raw_text)
     if not isinstance(data, list):
@@ -68,11 +82,12 @@ def _parse_items(raw_text: str) -> List[Dict[str, str]]:
         if not isinstance(it, dict):
             continue
         val = _slugify(it.get("value") or it.get("label", ""))
-        lab = _clean_label(it.get("label", ""))
+        lab = _clean_label(it.get("label", ""), max_len=max_len)
         if not lab:
             continue
         cleaned.append({"value": val, "label": lab})
-    return _ensure_unique_7_8(cleaned)
+    return _ensure_unique_7_8(cleaned, max_len=max_len)
+
 
 
 def _parse_examples_to_items(raw_text: str) -> list[dict[str, str]]:
@@ -290,23 +305,70 @@ def _build_skills_hard_prompt(position: str, lang_code: str) -> str:
 """.strip()
 
 
+# def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
+#     return f"""
+# Сгенерируй СПИСОК ИНСТРУМЕНТОВ/ПРОГРАММ (tools) для резюме под позицию "{position}".
+# Язык меток (label): "{lang_code}".
+
+# ТРЕБОВАНИЯ:
+# - Верни СТРОГО JSON-массив 7–8 объектов без пояснений и без бэктиков.
+# - Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<инструмент/пакет на {lang_code}>"}}
+# - "label": коротко, как в резюме (напр. "MS Office / Google Workspace", "Jira / Confluence", "CRM (Bitrix24, Salesforce)").
+# - "value": латиница, kebab-case, уникальные.
+
+# ПРИМЕР СТРУКТУРЫ (НЕ печатать его):
+# [
+#   {{"value":"ms-office-google-workspace","label":"MS Office / Google Workspace"}},
+#   {{"value":"jira-asana-trello","label":"Jira / Asana / Trello"}}
+# ]
+# """.strip()
 def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
     return f"""
 Сгенерируй СПИСОК ИНСТРУМЕНТОВ/ПРОГРАММ (tools) для резюме под позицию "{position}".
 Язык меток (label): "{lang_code}".
 
-ТРЕБОВАНИЯ:
-- Верни СТРОГО JSON-массив 6–10 объектов без пояснений и без бэктиков.
-- Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<инструмент/пакет на {lang_code}>"}}
-- "label": коротко, как в резюме (напр. "MS Office / Google Workspace", "Jira / Confluence", "CRM (Bitrix24, Salesforce)").
+ОБЩИЕ ТРЕБОВАНИЯ:
+- Верни СТРОГО JSON-массив 7–8 объектов без пояснений и без бэктиков.
+- Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<инструмент/пакет на {lang_code}>"}}.
 - "value": латиница, kebab-case, уникальные.
+- НЕ добавляй никакого текста до/после JSON-массива.
 
-ПРИМЕР СТРУКТУРЫ (НЕ печатать его):
+СТРУКТУРА label:
+- В КАЖДОМ "label" СНАЧАЛА идут 1–2 конкретных продукта/сервиса/системы через " / ",
+  а уже ПОТОМ — короткое описание класса системы после тире.
+  Примеры формата (НЕ печатать их дословно, это только образцы):
+  • "1С:Медицина / MedOffice — системы управления мед. практикой"
+- Если это класс систем, НЕ пиши только класс вроде "Системы управления медицинской практикой".
+  ОБЯЗАТЕЛЬНО дай конкретные продукты слева, а класс — справа после "—".
+- Названия продуктов должны быть полностью читабельны в начале строки.
+  Если строка получается длинной, СОКРАЩАЙ описательную часть после тире, но НЕ обрезай названия продуктов слева.
+
+ТРЕБОВАНИЯ К СПИСКУ:
+- Из 7–8 пунктов МИНИМУМ 4 ДОЛЖНЫ содержать разные конкретные продукты/сервисы
+  (их названия полностью видны слева до тире).
+- Остальные 3–4 пункта могут описывать классы систем, но всё равно начинаются с конкретных продуктов.
+- Разрешён максимум ОДИН базовый общий пункт типа "MS Office / Google Workspace — офисные пакеты".
+  Остальные пункты ДОЛЖНЫ содержать специализированные инструменты для роли "{position}".
+
+ТРЕБОВАНИЯ К "label":
+- 2–8 слов, без эмодзи и кавычек.
+- Формат строго: "<продукт1> [ / продукт2] — <краткое описание класса>".
+- Избегай пустых общих фраз ("Системы анализа данных", "Информационные системы")
+  без конкретных продуктов слева.
+
+ПРОВЕРКИ КАЧЕСТВА (выполни мысленно, НЕ выводи):
+- Убедись, что в начале каждого label стоят реальные названия ПО/сервисов.
+- Если видишь, что название продукта может быть обрезано, сократи описание после тире, а не имя продукта.
+- Не повторяй один и тот же продукт в разных пунктах без необходимости.
+
+ПРИМЕР СТРУКТУРЫ (НЕ печатать его, это только образец формата):
 [
-  {{"value":"ms-office-google-workspace","label":"MS Office / Google Workspace"}},
-  {{"value":"jira-asana-trello","label":"Jira / Asana / Trello"}}
+  {{"value":"medesk-medoffice-practice","label":"Medesk / MedOffice — управление мед. практикой"}},
+  {{"value":"epic-cerner-emr","label":"Epic / Cerner — электронные медкарты"}}
 ]
 """.strip()
+
+
 
 
 # =========================
@@ -319,7 +381,7 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1, 
     - retries: количество повторов при сетевых/парсинг-ошибках
     """
     # ⬇️ логируем то, что реально отправляем
-    log.info("============== PROMPT TO LLM%s:\n%s", f" [{tag}]" if tag else "", prompt)
+    log.info("============== PROMPT TO LLM%s:==============\n%s", f" [{tag}]" if tag else "", prompt)
 
     if not DO_AGENT_URL:
         raise RuntimeError("DO_AGENT_URL не задан в conf.py")
@@ -365,7 +427,7 @@ async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1, 
             cleaned = re.sub(r"\n?```$", "", cleaned).strip()
             
             # ⬇️ логируем то, что получаем
-            log.info("=============== PROMPT FROM LLM%s:\n%s", f" [{tag}]" if tag else "", cleaned)
+            log.info("++++++++++++ PROMPT FROM LLM%s:++++++++++++\n%s", f" [{tag}]" if tag else "", cleaned)
             return cleaned
 
         except httpx.HTTPStatusError as e:
@@ -676,7 +738,7 @@ async def generate_skills_tools_options(user_id: int) -> list[str] | None:
 
         prompt = _build_skills_tools_prompt(pos_norm, lang_code)
         raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
-        items  = _parse_items(raw)
+        items  = _parse_items(raw, max_len=70)
 
         for it in items:
             it["value"] = _short_value_for_cb(it.get("value", ""), pos_norm)
