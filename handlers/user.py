@@ -78,7 +78,20 @@ EXP_POSITION_MAX  = 50
 # ──────────────────────────────────────────────────────────────────────────────
 # Gate
 # ──────────────────────────────────────────────────────────────────────────────
-BUTTON_TEXT_STEPS = {"job_description", "contact_links"}  # тут всё, что точно текстом
+BUTTON_TEXT_STEPS = {"job_description", "contact_links"}
+
+# >>> НОВОЕ: мастер-шаги, где по умолчанию ожидаются КНОПКИ
+BUTTON_ONLY_MASTER_STEPS = {
+    "main_language",
+    "resume_language",
+    "resume_goal",
+    "summary",
+    "experience",
+    "education",
+    "courses",
+    "skills",
+    "languages",
+}
 def _is_button_step(session: Session, user_id: int, qkey: str) -> bool:
     if not qkey:
         return False
@@ -131,14 +144,6 @@ def _should_warn(user_id: int) -> bool:
         _last_warn_ts[user_id] = now
         return True
     return False
-
-
-
-
-
-
-
-
 
 
 
@@ -857,20 +862,11 @@ async def handle_answer(message: Message):
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
 
-
     # >>> ЖЁСТКИЙ ГАРД: если открыты ворота (ждём кнопку) — блокируем любой текст
-    gate_key = gate_for(tg_id)
-    if gate_key:
-        if _should_warn(tg_id):
-            await message.answer(KEYBOARD_ONLY_MSG)
-        def _uid():
-            with Session(engine) as s:
-                u = s.query(User).filter_by(telegram_id=tg_id).first()
-                return u.id if u else None
-        user_db_id = await asyncio.to_thread(_uid)
-        await send_question(message.chat.id, gate_key, user_db_id)
-        return
-
+    # gate_key = gate_for(user_id)
+    # if gate_key:
+    #     await message.answer(KEYBOARD_ONLY_MSG)
+    #     return
 
     # ------- утилиты -------
     def _merge_ms_and_free(ms_text: str, user_text: str) -> str:
@@ -883,12 +879,10 @@ async def handle_answer(message: Message):
         return f"{ms_text}, {human}" if (ms_text and human) else (ms_text or human)
 
     def _get_tmp_ms_text(s, user_id: int, qkey: str) -> str:
-        # parent="__tmp__", step="ms::<qkey>"
         from handlers.db_helpers import get_draft_value
         return get_draft_value(s, user_id, parent_key="__tmp__", step_key=f"ms::{qkey}") or ""
 
     def _clear_tmp_ms_text(s, user_id: int, qkey: str):
-        # затираем временную запись пустотой
         replace_draft(s, user_id, parent_key="__tmp__", step_key=f"ms::{qkey}", value="")
         s.commit()
 
@@ -899,18 +893,25 @@ async def handle_answer(message: Message):
             if not user:
                 return None, None, "no_user", None
 
-            # что ждём?
             free_qkey     = pop_free_wait(s, user.id)
             awaiting_step = pop_personal_wait(s, user.id)
             s.commit()
 
-            if free_qkey or awaiting_step:
-                close_text_gate(user.id)
-
-            # если ничего не ждём и текущий шаг кнопочный — просим жать кнопки
             if not free_qkey and not awaiting_step:
                 current_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
-                if _is_button_step(s, user.id, current_key):
+
+                need_button = current_key in BUTTON_ONLY_MASTER_STEPS
+
+                if current_key == "summary":
+                    idx = drafts_count(s, user.id, "summary")
+                    if 0 <= idx < len(SUMMARY_STEPS):
+                        sub_key, _ = SUMMARY_STEPS[idx]
+                        need_button = True
+
+                if not need_button:
+                    need_button = _is_button_step(s, user.id, current_key)
+
+                if need_button:
                     return user.id, current_key, "need_button", None
 
             # лимиты длины
@@ -1061,15 +1062,19 @@ async def handle_answer(message: Message):
     if error == "no_user":
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
-    # if error == "need_button":
-        # await message.answer(USE_KEYBOARD_MSG)
-    #     await send_question(message.chat.id, next_key, user_id)
-    #     return
+
     if error == "need_button":
-        if _should_warn(user_id):
-            await message.answer(KEYBOARD_ONLY_MSG)
-        await send_question(message.chat.id, next_key, user_id)
+        try:
+            if _should_warn(user_id):
+                await message.answer(KEYBOARD_ONLY_MSG)
+        except NameError:
+            await message.answer(
+                USE_KEYBOARD_MSG
+                if 'USE_KEYBOARD_MSG' in globals()
+                else "Пожалуйста, используй кнопки под сообщением."
+            )
         return
+
     if error == "too_many_words":
         await message.answer(f"💡 Сообщение длинновато. Давай уложимся в {payload} слов 🙂")
         return
@@ -1779,8 +1784,7 @@ async def handle_lang(callback: CallbackQuery):
         return
 
     # 👤 Кастомный язык — просим текстом
-    if action == "custom":                                         # ← НОВОЕ
-        # ждём текст от пользователя с ключом 'lang_custom'
+    if action == "custom":
         def _mark_wait():
             with Session(engine) as s:
                 set_free_wait(s, user_id, "lang_custom")
@@ -1807,9 +1811,7 @@ async def handle_lang(callback: CallbackQuery):
                 return _upsert_lang_pair(s, user_id, lang_label, lvl_label)
 
         await asyncio.to_thread(_save_pair)
-        # await callback.message.answer(f"✅ Добавил: {pair}")
         await callback.answer(f"✅ Добавлено: {pair}", show_alert=False)
-        # await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
         extra = await asyncio.to_thread(_current_langs_text, user_id)
         text = LANGS_MSG + extra
         await callback.message.edit_text(text, reply_markup=lang_actions_kb())
@@ -1817,7 +1819,7 @@ async def handle_lang(callback: CallbackQuery):
         return
 
     # Выбор уровня для КАСТОМНОГО языка
-    if action == "level_custom":                                   # ← НОВОЕ
+    if action == "level_custom":
         lvl_code = rest[0]
         lvl_label = dict(LANG_LEVELS).get(lvl_code, lvl_code)
 
@@ -1829,9 +1831,7 @@ async def handle_lang(callback: CallbackQuery):
                 return lang_label
 
         lang_label = await asyncio.to_thread(_finish_custom)
-        # await callback.message.answer(f"✅ Добавил: {lang_label} – {lvl_label}")
         await callback.answer(f"✅ {lang_label} – {lvl_label}", show_alert=False)
-        # await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
         extra = await asyncio.to_thread(_current_langs_text, user_id)
         text = LANGS_MSG + extra
         await callback.message.edit_text(text, reply_markup=lang_actions_kb())
@@ -1910,180 +1910,6 @@ KB_OVERHEAD = len(BTN_PREFIX)
 
 def _fits_keyboard_label(label: str) -> bool:
     return len(label or "") <= (BUTTON_TEXT_MAX - KB_OVERHEAD)
-
-# @router.callback_query(F.data.startswith("ms:"))
-# async def handle_multiselect(callback: CallbackQuery):
-#     _, action, rest = callback.data.split(":", 2)
-
-#     qkey = rest
-#     val  = None
-
-#     if action == "toggle":
-#         qkey, val = rest.rsplit(":", 1)
-
-#     await callback.answer()
-
-#     chat_id = callback.message.chat.id
-#     tg_id = callback.from_user.id
-
-#     if action == "save":
-#         now = asyncio.get_event_loop().time()
-#         key_ = (chat_id, qkey)
-#         if _last_save_ts.get(key_, 0) + 0.6 > now:
-#             await callback.answer("Уже сохраняю…", show_alert=False)
-#             return
-#         _last_save_ts[key_] = now
-
-#     async with _lock_for(chat_id):
-#         def _work():
-#             with Session(engine) as s:
-#                 user = s.query(User).filter_by(telegram_id=tg_id).first()
-#                 if not user:
-#                     return None, None, "no_user", None
-                
-#                 if action == "personal":
-#                     if qkey.startswith("exp") and "::" in qkey:
-#                         set_free_wait(s, user.id, qkey)
-#                     else:
-#                         set_personal_wait(s, user.id, qkey)
-#                     s.commit()
-#                     return user.id, None, "__await_text__", None
-
-#                 if action == "toggle":
-#                     toggle_selection(s, user.id, qkey, val)
-#                     s.commit()
-#                     selected = get_selected_set(s, user.id, qkey)
-#                     return user.id, selected, None, None
-
-#                 if action == "reset":
-#                     clear_selection(s, user.id, qkey)
-#                     s.commit()
-#                     return user.id, set(), None, None
-
-#                 if action == "save":
-#                     text = build_answer_text_from_selection(s, user.id, qkey)
-#                     if not text.strip():
-#                         return user.id, None, "empty", None
-
-#                     if "::" in qkey and qkey.startswith("exp"):
-#                         parent, step = qkey.split("::", 1)
-#                         replace_draft(s, user.id, parent_key=parent, step_key=step, value=text)
-#                         clear_selection(s, user.id, qkey)
-#                         s.commit()
-#                         return user.id, f"__continue_experience__:{parent}", "saved", text
-
-#                     if qkey in SUMMARY_KEYS:
-#                         replace_draft(s, user.id, parent_key="summary", step_key=qkey, value=text)
-#                         clear_selection(s, user.id, qkey)
-#                         s.commit()
-#                         return user.id, "__continue_summary__", "saved", text
-
-#                     if qkey.startswith("skills_"):
-#                         replace_draft(s, user.id, parent_key="skills", step_key=qkey, value=text)
-#                         clear_selection(s, user.id, qkey)
-#                         s.commit()
-#                         return user.id, "__continue_skills__", "saved", text
-
-#                     # Остальные мультивыборы — как было
-#                     save_answer(s, user.id, qkey, text)
-#                     clear_selection(s, user.id, qkey)
-#                     next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
-#                     s.commit()
-#                     return user.id, next_key, "saved", text
-#                 return user.id, None, None, None
-#         user_id, payload, status, echo_text = await asyncio.to_thread(_work)
-
-#         if not user_id:
-#             await callback.message.answer("Сначала /start.")
-#             return
-        
-#         if action == "personal":
-#             try:
-#                 await callback.message.edit_reply_markup(reply_markup=None)
-#             except Exception as e:
-#                 logger.debug("edit_reply_markup skip: %s", e)
-#             msg = personal_msg_for(qkey)
-#             close_text_gate(user_id)
-#             await callback.message.answer(msg)
-#             return
-
-#         if action in {"toggle", "reset"}:
-#             base_qkey = qkey.split("::", 1)[1] if ("::" in qkey) else qkey
-
-#             role_for_exp = None
-#             if base_qkey == "experience_tasks" and "::" in qkey:
-#                 parent = qkey.split("::", 1)[0]   # exp1 / exp2 ...
-#                 def _role():
-#                     with Session(engine) as s:
-#                         from handlers.db_helpers import get_draft_value
-#                         return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
-#                 role_for_exp = await asyncio.to_thread(_role)
-#             role_for_exp_norm = normalize_position(role_for_exp)
-#             pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, role_for_exp_norm)
-#             pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
-#             pairs = pairs or []
-#             markup = build_multiselect_kb(qkey, pairs, payload or set())
-#             try:
-#                 await callback.message.edit_reply_markup(reply_markup=markup)
-#             except Exception as e:
-#                 logger.debug("edit_reply_markup skip: %s", e)
-#             return
-
-#         if action == "save":
-#             if status == "empty":
-#                 await callback.answer("Выбери хотя бы один вариант или сбрось выбор.", show_alert=True)
-#                 base_qkey = qkey.split("::", 1)[1] if ("::" in qkey) else qkey
-#                 role_for_exp = None
-#                 if base_qkey == "experience_tasks" and "::" in qkey:
-#                     parent = qkey.split("::", 1)[0]
-#                     def _role():
-#                         with Session(engine) as s:
-#                             from handlers.db_helpers import get_draft_value
-#                             return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
-#                     role_for_exp = await asyncio.to_thread(_role)
-
-#                 role_for_exp_norm = normalize_position(role_for_exp)
-
-#                 pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, role_for_exp_norm)
-#                 pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
-#                 def _sel():
-#                     with Session(engine) as s:
-#                         return get_selected_set(s, user_id, qkey)
-#                 selected_now = await asyncio.to_thread(_sel)
-#                 try:
-#                     await callback.message.edit_reply_markup(
-#                         reply_markup=build_multiselect_kb(qkey, pairs, selected_now or set())
-#                     )
-#                 except Exception as e:
-#                     logger.debug("edit_reply_markup (empty-save) skip: %s", e)
-#                 return
-#             # 2) а вот ТЕПЕРЬ, когда точно не пусто — снимаем клавиатуру
-#             await callback.message.edit_reply_markup(reply_markup=None)
-#             close_text_gate(user_id)
-
-#             if echo_text:
-#                 await callback.message.answer(f"🌟 Готово! Сохранил вариант(ы): {echo_text}")
-
-#             if payload == "__continue_summary__":
-#                 await ask_next_summary_step(chat_id, user_id)
-#                 return
-
-#             if isinstance(payload, str) and payload.startswith("__continue_experience__"):
-#                 parent = payload.split(":", 1)[1]
-#                 exp_index = int(parent.replace("exp", "") or "1")
-#                 await ask_next_experience_step(chat_id, user_id, exp_index=exp_index)
-#                 return
-
-#             if payload == "__continue_skills__":
-#                 await ask_next_skills_step(chat_id, user_id)
-#                 return
-            
-#             if payload:
-#                 await send_next_with_intro(chat_id, payload, user_id)
-#             else:
-#                 await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
-#                 await create_order_and_run_ai(chat_id, user_id)
-
 
 
 
