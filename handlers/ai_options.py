@@ -169,42 +169,6 @@ def _build_tasks_prompt(position: str, lang_code: str) -> str:
 """.strip()
 
 
-# def _build_values_prompt(position: str, lang_code: str) -> str:
-#     return f"""
-# Сгенерируй рабочие ЦЕННОСТИ (work values) для роли "{position}".
-# Язык меток (label): "{lang_code}".
-# Если введённая роль неоднозначная (например: архитектор, дизайнер, инженер), не уточнённая пользователем — не додумывай, а воспринимай буквально, например не архитектор приложений, а архитектор просто! 
-
-# ТРЕБОВАНИЯ К ВЫВОДУ
-# - Верни СТРОГО JSON-массив из 7 или 8 объектов без пояснений и бэктиков.
-# - Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<короткая фраза на {lang_code}>"}}
-# - "label": 25–45 символов, простая речь, без кавычек и эмодзи; формулируй как устойчивую ценность («что ценим и как подходим»), а не как одноразовое действие или команду.
-# - "value": латиница, kebab-case, уникальные, без префиксов.
-# - Не более 3 универсальных пунктов (вроде «Командная работа», «Прозрачность»).
-#   Минимум 4 пунктов ДОЛЖНЫ описывать поведение, характерное именно для роли "{position}".
-
-# ПРОСТОЕ ПРАВИЛО РЕЛЕВАНТНОСТИ (выполни мысленно, НЕ выводи):
-# 1) Из названия роли "{position}" мысленно выведи 3–6 ключевых ситуаций, решений и критериев качества, с которыми человек сталкивается ежедневно.
-#    Примеры направления мысли (НЕ печатать):
-#    • сервисные роли: гостевой сервис, скорость и порядок, чистота/санитария, касса/POS, обработка жалоб;
-#    • начинающий разработчик: читаемый код, мелкие коммиты, ревью/PR-дисциплина, базовые тесты, запрос фидбэка, ведение задач;
-#    • офисные/менеджерские: приоритизация задач, коммуникации со стейкхолдерами, контроль сроков/рисков, фиксация решений.
-# 2) Преврати эти наблюдения в ценности.
-# 3) Удали дубли и обобщённые синонимы. Сформируй 7–8 уникальных пунктов.
-
-# ПРОВЕРКИ КАЧЕСТВА
-# - Избегай повелительных формулировок («делай», «держи», «поддерживать») и прямого перечисления задач; акцентируй на ценности.
-# - Сохраняй разнообразие: отражай качество, взаимодействия, риски, скорость, документацию и другие аспекты ежедневной работы роли.
-
-# ФОРМАТ ОТВЕТА (пример структуры, НЕ печатать сам пример):
-# [
-#   {{"value":"release-stability-focus","label":"Фокус на устойчивости релизов"}},
-#   {{"value":"stakeholder-clarity","label":"Прозрачные апдейты для стейкхолдеров"}},
-#   ...
-# ]
-# """.strip()
-
-
 
 
 # ==== main skills from file  ====
@@ -255,34 +219,42 @@ def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
 """.strip()
 
 
-def _build_exp_achievements_prompt(role_title: str, lang_code: str) -> str:
+
+def _build_exp_achievements_from_tasks_prompt(role_title: str, tasks_text: str, lang_code: str) -> str:
     return f"""
-Сгенерируй РЕЛЕВАНТНЫЕ для должности "{role_title}" примеры достижений в резюме.
+У тебя есть специалист с должностью "{role_title}" и вот список его реальных задач (из резюме):
+
+{tasks_text}
+
+На основе ИМЕННО ЭТИХ задач сгенерируй РЕЛЕВАНТНЫЕ для резюме примеры достижений.
 Язык: "{lang_code}".
-Если введённая должность неоднозначная (например: архитектор, дизайнер, инженер), не уточнённая пользователем — не додумывай, а воспринимай буквально, например не архитектор приложений, а архитектор просто! 
 
-Формат: ВЕРНИ СТРОГО JSON-массив ИЗ 3 СТРОК без пояснений и без бэктиков.
-Каждая строка — одно достижение по формуле:
-действие + метрика + период + за счёт + эффект.
+ФОРМАТ:
+- Верни СТРОГО JSON-массив ИЗ 3 СТРОК без пояснений и без бэктиков.
+- Каждая строка — одно достижение по формуле:
+  действие + метрика + период + за счёт + эффект + бизнес-результат.
 
-Требования к стилю:
-- 25–45 символов на строку.
-- Конкретные числа/проценты/сроки (если уместно).
+ТРЕБОВАНИЯ К СТИЛЮ:
+- 60–120 символов на строку (не делай короче 50).
+- Обязательно:
+  • конкретная метрика (%, деньги, количество, скорость, время);
+  • период (за 3 месяца, за год, за квартал и т.п.);
+  • за счёт чего (какие именно скрипты, какая автоматизация, какие модели);
+  • эффект для бизнеса (рост выручки, сокращение ошибок, экономия времени, улучшение качества и т.п.).
 - Без эмодзи, без кавычек, без Markdown.
-- Фразы должны чувствоваться "про {role_title}" (лексика/контекст роли).
+- Фразы должны быть правдоподобны для этих задач и роли "{role_title}" и выглядеть как реальные достижения для HR.
 
-Важно:
-- Возврати ТОЛЬКО JSON-массив строк без какого-либо текста до/после.
-- Запрещены буллеты, нумерация, комментарии, пояснения, кавычки-снаружи массива и лишние запятые.
-- ЕСЛИ не можешь — всё равно верни массив из ТРЁХ корректных строк.
-
-Примеры структуры (НЕ печатать их, это не часть ответа):
-[
-  "Снизил расходы на 22% за 9 мес. за счёт новых условий — экономия ~$5000/мес.",
-  "Ускорил выдачу на 30% за 6 мес. автоматизацией — просрочки −45%.",
-  "Довёл NPS до 4.8/5 за квартал обучением — повторные покупки +15%."
-]
+ВАЖНО:
+- Возврати ТОЛЬКО JSON-массив строк без текста до/после.
+- Никаких буллетов, нумерации, пояснений или комментариев.
 """.strip()
+
+
+
+
+
+
+
 
 
 # ==== skills_hard & skills_tools ====
@@ -305,23 +277,6 @@ def _build_skills_hard_prompt(position: str, lang_code: str) -> str:
 """.strip()
 
 
-# def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
-#     return f"""
-# Сгенерируй СПИСОК ИНСТРУМЕНТОВ/ПРОГРАММ (tools) для резюме под позицию "{position}".
-# Язык меток (label): "{lang_code}".
-
-# ТРЕБОВАНИЯ:
-# - Верни СТРОГО JSON-массив 7–8 объектов без пояснений и без бэктиков.
-# - Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<инструмент/пакет на {lang_code}>"}}
-# - "label": коротко, как в резюме (напр. "MS Office / Google Workspace", "Jira / Confluence", "CRM (Bitrix24, Salesforce)").
-# - "value": латиница, kebab-case, уникальные.
-
-# ПРИМЕР СТРУКТУРЫ (НЕ печатать его):
-# [
-#   {{"value":"ms-office-google-workspace","label":"MS Office / Google Workspace"}},
-#   {{"value":"jira-asana-trello","label":"Jira / Asana / Trello"}}
-# ]
-# """.strip()
 def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
     return f"""
 Сгенерируй СПИСОК ИНСТРУМЕНТОВ/ПРОГРАММ (tools) для резюме под позицию "{position}".
@@ -632,7 +587,13 @@ def _coerce_bullets_to_array(text: str) -> list[str]:
     return picked[:3]
 
 @alert_on_exception(ttl=1)
-async def generate_experience_achievements_examples(user_id: int, role_title: str, *, notify: bool = False) -> list[str] | None:
+async def generate_experience_achievements_examples(
+    user_id: int,
+    role_title: str,
+    tasks_text: str | None = None,
+    *,
+    notify: bool = True
+) -> list[str] | None:
 
     """
     Генерирует 3 примера достижений для указанной роли и сохраняет их как options
@@ -645,10 +606,11 @@ async def generate_experience_achievements_examples(user_id: int, role_title: st
         role = (role_title or "").strip()
         if not role:
             return None
+        
+        tasks_text = tasks_text or ""   
 
-        prompt = _build_exp_achievements_prompt(role, lang_code)
+        prompt = _build_exp_achievements_from_tasks_prompt(role, tasks_text, lang_code)
         raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
-
         items  = _parse_examples_to_items(raw)
 
         for it in items:
@@ -665,7 +627,6 @@ async def generate_experience_achievements_examples(user_id: int, role_title: st
                  user_id, inserted, role, lang_code)
 
         labels = [it.get("label","") for it in items if it.get("label")]
-        # лёгкий инфо-алёрт (как в других местах)
         if notify and labels:
             try:
                 username, full_name, _ = get_user_identity(user_id)
@@ -674,6 +635,9 @@ async def generate_experience_achievements_examples(user_id: int, role_title: st
                     f"Full name: {full_name or '-'}",
                     "",
                     f"Experience role: {role} - {lang_code}",
+                    "",
+                    "Tasks:",
+                    tasks_text or "-",
                     "",
                     "Achievements (examples):",
                     "- " + "\n- ".join(labels)
@@ -804,25 +768,14 @@ async def chain_generate_after_position(user_id: int):
 
 @alert_on_exception(ttl=1)
 async def generate_experience_bundle(user_id: int, role_title: str):
-    """
-    Параллельно генерим exp tasks + achievements для выбранной роли,
-    сохраняем options и отправляем ОДИН общий алерт.
-    """
     role = (role_title or "").strip()
     if not role:
         return
-
-    # параллельная генерация без собственных алертов
-    tasks_labels, ach_labels = await asyncio.gather(
-        generate_experience_tasks_options(user_id, role, notify=False),
-        generate_experience_achievements_examples(user_id, role, notify=False),
-    )
-
-    # если совсем пусто — молчим
-    if not (tasks_labels or ach_labels):
+    
+    tasks_labels = await generate_experience_tasks_options(user_id, role, notify=False)
+    if not tasks_labels:
         return
 
-    # собираем одно сообщение
     username, full_name, _ = get_user_identity(user_id)
     ctx = get_user_context(user_id)
     lang_code = _map_lang_code(ctx.get("lang"))
@@ -832,10 +785,9 @@ async def generate_experience_bundle(user_id: int, role_title: str):
         f"Full name: {full_name or '-'}",
         "",
         f"Experience role: {role} - {lang_code}",
+        "",
+        "Experience tasks:",
+        "- " + "\n- ".join(tasks_labels),
     ]
-    if tasks_labels:
-        parts += ["", "Experience tasks:", "- " + "\n- ".join(tasks_labels)]
-    if ach_labels:
-        parts += ["", "Achievements:", "- " + "\n- ".join(ach_labels)]
 
     await alert.send("\n".join(parts), level="INFO")
