@@ -23,7 +23,8 @@ from handlers.bot_app import bot
 from handlers.options_repo import get_options, get_label_for, normalize_position, get_user_context
 from handlers.ai_options import (
     chain_generate_after_position,
-    generate_experience_bundle)
+    generate_experience_bundle,
+    generate_experience_achievements_examples)
 
 from _database import engine, User
 
@@ -558,239 +559,6 @@ def _limit_for_key(step_key: str | None) -> int:
     base = step_key.split("::", 1)[1] if "::" in step_key else step_key
     return JOB_DESC_WORD_LIMIT if base == "job_description" else WORD_LIMIT
 
-# @router.message(F.text & ~F.text.startswith("/"))
-# async def handle_answer(message: Message):
-#     tg_id = message.from_user.id
-#     raw_text = (message.text or "").strip()
-
-#     def _work(text_in: str):
-#         with Session(engine) as s:
-#             user = s.query(User).filter_by(telegram_id=tg_id).first()
-#             if not user:
-#                 return None, None, "no_user", None
-
-#             free_qkey = pop_free_wait(s, user.id)
-#             awaiting_step = pop_personal_wait(s, user.id)
-
-#             if not free_qkey and not awaiting_step:
-#                 if gate_for(user.id):
-#                     return user.id, None, "keyboard_only", gate_for(user.id)
-
-#             step_for_limit = (
-#                 free_qkey or 
-#                 awaiting_step or 
-#                 get_first_unanswered(s, user.id, QUESTION_FLOW)
-#                 )
-
-#             lim = _limit_for_key(step_for_limit)
-#             if _too_many_words(text_in, lim):
-#                 return user.id, None, "too_many_words", lim
-
-#             if free_qkey:
-#                 if free_qkey.startswith("exp") and "::" in free_qkey:
-#                     parent, step = free_qkey.split("::", 1)
-#                     parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
-#                     human = ", ".join(parts) if parts else text_in
-#                     if step == "experience_title" and len(human) > EXP_POSITION_MAX:
-#                         return user.id, None, "exp_title_too_long", None
-#                     replace_draft(s, user.id, parent_key=parent, step_key=step, value=human)
-#                     s.commit()
-
-#                     if step == "experience_title":
-#                         return user.id, f"__experience_title_saved__:{parent}", None, human
-#                     return user.id, f"__experience_step_saved__:{parent}", None, step
-
-#                 # как и было: summary_* свой вариант
-#                 if free_qkey.startswith("summary_"):
-#                     add_draft(s, user.id, "summary", free_qkey, text_in)
-#                     s.commit()
-#                     return user.id, "summary_step_saved", None, free_qkey
-                
-#                 # user.py — ВНУТРИ handle answer(), в ветке free_qkey:
-#                 if free_qkey.startswith("edu") and "::" in free_qkey:
-#                     parent, step = free_qkey.split("::", 1)
-#                     parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
-#                     human = ", ".join(parts) if parts else text_in
-#                     replace_draft(s, user.id, parent_key=parent, step_key=step, value=human)
-#                     s.commit()
-#                     return user.id, f"__edu_step_saved__:{parent}", None, step
-                
-#                 # курсы: каждый текст — отдельная запись в parent="courses"
-#                 if free_qkey.startswith("courses") and "::" in free_qkey:
-#                     parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
-#                     human = ", ".join(parts) if parts else text_in
-#                     # для курсов используем add_draft (НЕ replace), чтобы не затирать предыдущие
-#                     add_draft(s, user.id, parent_key="courses", step_key="course_item", value=human)
-#                     s.commit()
-#                     return user.id, "__courses_step_saved__", None, "courses"
-
-#                 if free_qkey.startswith("skills_"):
-#                     parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
-#                     human = ", ".join(parts) if parts else text_in
-#                     replace_draft(s, user.id, parent_key="skills", step_key=free_qkey, value=human)
-#                     s.commit()
-#                     return user.id, "__continue_skills__", None, free_qkey
-
-#                 if free_qkey == "lang_custom":
-#                     name = _norm_lang_label(text_in)   # ту же утилиту можно скопировать сюда или импортнуть
-#                     replace_draft(s, user.id, parent_key="skills", step_key="skills_langs__tmp_name", value=name)
-#                     s.commit()
-#                     # просим выбрать уровень
-#                     return user.id, "__ask_level_for_custom_lang__", None, name
-
-#                 if free_qkey in ("full_name", "contact_phone", "contact_email", "contact_links"):
-#                     ok, normalized, err, hint = validate_field(free_qkey, text_in)
-#                     if not ok:
-#                         return user.id, None, "bad_input", hint
-#                     text_in = normalized
-            
-#                 save_answer(s, user.id, free_qkey, text_in)
-#                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
-#                 return user.id, next_key, None, free_qkey
-
-#             awaiting_step = pop_personal_wait(s, user.id)
-#             if awaiting_step:
-#                 parts = [p.strip() for p in re.split(r"[,\n;]+", text_in) if p.strip()]
-#                 human = ", ".join(parts) if parts else text_in
-
-#                 if awaiting_step.startswith("summary_"):
-#                     replace_draft(s, user.id, parent_key="summary", step_key=awaiting_step, value=human)
-#                     s.commit()
-#                     return user.id, "summary_step_saved", None, awaiting_step
-
-#                 if awaiting_step.startswith("skills_"):
-#                     replace_draft(s, user.id, parent_key="skills", step_key=awaiting_step, value=human)
-#                     s.commit()
-#                     return user.id, "__continue_skills__", None, awaiting_step
-
-#             current_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
-
-#             # если сейчас шаг кнопочный, а мы НЕ ждём текст — блокируем текстовый ввод
-#             if (not free_qkey) and (not awaiting_step) and _is_button_step(s, user.id, current_key):
-#                 return user.id, current_key, "need_button", None
-
-#             # защита длины для target_position
-#             if current_key == "target_position" and len(text_in) > TRGT_POSITION_MAX:
-#                 return user.id, None, "target_too_long", None
-            
-#             word_limit = JOB_DESC_WORD_LIMIT if current_key == "job_description" else WORD_LIMIT
-#             if _too_many_words(text_in, word_limit):
-#                 return user.id, None, "too_many_words", word_limit
-
-#             if current_key in ("full_name", "contact_phone", "contact_email", "contact_links"):
-#                 ok, normalized, err, hint = validate_field(current_key, text_in)
-#                 if not ok:
-#                     return user.id, None, "bad_input", hint  # хинт отдадим наружу
-#                 text_to_save = normalized
-#             else:
-#                 text_to_save = text_in
-
-#             # ▶ Если мы на шаге summary — это ответ на ТЕКУЩИЙ подвопрос
-#             if current_key == "summary":
-#                 idx = drafts_count(s, user.id, "summary")
-#                 if idx < len(SUMMARY_STEPS):
-#                     step_key, _ = SUMMARY_STEPS[idx]
-#                     add_draft(s, user.id, "summary", step_key, text_to_save)
-#                     s.commit()
-#                     return user.id, "summary_step_saved", None, step_key
-
-#             # ♦ Иначе обычное сохранение
-#             if not current_key:
-#                 return user.id, None, "done", None
-#             save_answer(s, user.id, current_key, text_to_save)
-#             next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
-#             return user.id, next_key, None, current_key
-
-#     user_id, next_key, error, payload = await asyncio.to_thread(_work, raw_text)
-
-#     if error == "keyboard_only":
-#         await message.answer(KEYBOARD_ONLY_MSG)
-#         return
-    
-#     if error == "need_button":
-#         await message.answer(USE_KEYBOARD_MSG)
-#         await send_question(message.chat.id, next_key, user_id)
-#         return
-
-#     if error == "too_many_words":
-#         await message.answer(f"💡 Сообщение длинновато. Давай уложимся в {payload} слов 🙂")
-#         return
-
-#     # ---------- обработка ошибок из _work ----------
-#     if error == "no_user":
-#         await message.answer("Напиши /start сначала, пожалуйста.")
-#         return
-#     if error == "target_too_long":
-#         await message.answer(
-#             f"💡 Название должности немного длинное. Давай уложим его в {TRGT_POSITION_MAX} символов.\n"
-#             f"Например: «Product Manager», «Архитектор»."
-#         )
-#         return
-#     if error == "exp_title_too_long":
-#         await message.answer(
-#             f"💡 Должность в опыте получилась длинной. Нужно до {EXP_POSITION_MAX} символов.\n"
-#             f"Примеры: «QA», «Бариста», «Аналитик»."
-#         )
-#         return
-#     if error == "bad_input":
-#         await message.answer(payload)
-#         return
-
-#     # 🔔 ХУК: только что ответили на target_position → запускаем фон
-#     # if not error and payload == "target_position":
-#     #     asyncio.create_task(chain_generate_after_position(user_id))
-
-#     if next_key == "summary_step_saved":
-#         await ask_next_summary_step(message.chat.id, user_id)
-#         return
-    
-#     if isinstance(next_key, str) and next_key.startswith("__experience_title_saved__"):
-#         parent = next_key.split(":", 1)[1]         # exp1/exp2
-#         exp_index = int(parent.replace("exp", "") or "1")
-#         title_text = payload or ""
-#         # 🔔 ХУК: генерация задач для опыта работы
-#         # asyncio.create_task(generate_experience_bundle(user_id, title_text))
-#         await ask_next_experience_step(message.chat.id, user_id, exp_index=exp_index)
-#         return
-
-#     # обычное «шаг сохранён» для прочих подшагов опыта
-#     if isinstance(next_key, str) and next_key.startswith("__experience_step_saved__"):
-#         parent = next_key.split(":", 1)[1]
-#         exp_index = int(parent.replace("exp", "") or "1")
-#         await ask_next_experience_step(message.chat.id, user_id, exp_index=exp_index)
-#         return
-    
-#     if isinstance(next_key, str) and next_key.startswith("__edu_step_saved__"):
-#         parent = next_key.split(":", 1)[1]      # edu1 / edu2 / ...
-#         edu_index = int(parent.replace("edu", "") or "1")
-#         await ask_next_education_step(message.chat.id, user_id, edu_index=edu_index)
-#         return
-    
-#     # повторный показ клавиатуры курсов после добавления пункта
-#     if next_key == "__courses_step_saved__":
-#         await ask_next_courses_step(message.chat.id, user_id)
-#         return
-
-#     if error == "done":
-#         await message.answer("Все ответы уже собраны. 🚀")
-#         await create_order_and_run_ai(message, user_id)
-#         return
-
-#     if next_key == "__continue_skills__":
-#         await ask_next_skills_step(message.chat.id, user_id)
-#         return
-    
-#     if next_key == "__ask_level_for_custom_lang__":
-#         await message.answer(f"Язык: {payload or ''}\nТеперь выбери уровень:")
-#         await bot.send_message(message.chat.id, "Уровень владения:", reply_markup=lang_levels_custom_kb())
-#         return
-
-#     if next_key:
-#         await send_next_with_intro(message.chat.id, next_key, user_id)
-#     else:
-#         await message.answer("🎉 Спасибо! Всё заполнено.\n\nРезюме генерируется ... (1-2 мин.)")
-#         await create_order_and_run_ai(message, user_id)
-
 
 TMP_PARENT = "__tmp__"
 
@@ -861,12 +629,6 @@ async def handle_answer(message: Message):
     if not user_id:
         await message.answer("Напиши /start сначала, пожалуйста.")
         return
-
-    # >>> ЖЁСТКИЙ ГАРД: если открыты ворота (ждём кнопку) — блокируем любой текст
-    # gate_key = gate_for(user_id)
-    # if gate_key:
-    #     await message.answer(KEYBOARD_ONLY_MSG)
-    #     return
 
     # ------- утилиты -------
     def _merge_ms_and_free(ms_text: str, user_text: str) -> str:
@@ -1421,7 +1183,60 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
         await bot.send_message(chat_id, prompt, reply_markup=markup)
         open_text_gate(user_id, f"{parent}::{step_key}")
         return
-    
+
+
+    if step_key == "experience_positioning":
+        def _mark():
+            with Session(engine) as s:
+                set_free_wait(s, user_id, f"{parent}::{step_key}")
+                s.commit()
+
+        await asyncio.to_thread(_mark)
+        close_text_gate(user_id)
+        await bot.send_message(chat_id, prompt)
+
+        def _role():
+            with Session(engine) as s:
+                from handlers.db_helpers import get_draft_value
+                return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
+        role = (await asyncio.to_thread(_role)) or ""
+        role_norm = normalize_position(role)
+        
+        def _tasks_text():
+            with Session(engine) as s:
+                from handlers.db_helpers import get_draft_value
+                return get_draft_value(s, user_id, parent_key=parent, step_key="experience_tasks") or ""
+        tasks_text = (await asyncio.to_thread(_tasks_text)) or ""
+
+        await generate_experience_achievements_examples(
+            user_id,
+            role_norm or role,
+            tasks_text=tasks_text,
+            notify=True,
+        )
+        
+        return
+
+
+
+    if step_key == "experience_best_qualities":
+        def _mark():
+            with Session(engine) as s:
+                set_free_wait(s, user_id, f"{parent}::{step_key}")
+                s.commit()
+
+        await asyncio.to_thread(_mark)
+        close_text_gate(user_id)
+        await bot.send_message(chat_id, prompt)
+        return
+
+
+
+
+
+
+
+
     if step_key == "experience_achievements":
         def _mark():
             with Session(engine) as s:
