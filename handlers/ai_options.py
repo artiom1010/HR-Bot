@@ -72,9 +72,34 @@ def _ensure_unique_7_8(items: List[Dict[str, str]], max_len: int = 56) -> List[D
 
 
 
+# def _parse_items(raw_text: str, *, max_len: int = 56) -> List[Dict[str, str]]:
+#     """Принимаем строку с JSON-массивом и возвращаем нормализованный список словарей."""
+#     data = json.loads(raw_text)
+#     if not isinstance(data, list):
+#         raise ValueError("Ожидался JSON-массив")
+#     cleaned: List[Dict[str, str]] = []
+#     for it in data:
+#         if not isinstance(it, dict):
+#             continue
+#         val = _slugify(it.get("value") or it.get("label", ""))
+#         lab = _clean_label(it.get("label", ""), max_len=max_len)
+#         if not lab:
+#             continue
+#         cleaned.append({"value": val, "label": lab})
+#     return _ensure_unique_7_8(cleaned, max_len=max_len)
 def _parse_items(raw_text: str, *, max_len: int = 56) -> List[Dict[str, str]]:
     """Принимаем строку с JSON-массивом и возвращаем нормализованный список словарей."""
-    data = json.loads(raw_text)
+    s = (raw_text or "").strip()
+    # 1) Пытаемся сразу распарсить как чистый JSON
+    try:
+        data = json.loads(s)
+    except json.JSONDecodeError:
+        # 2) Фоллбек: ищем первый блок в квадратных скобках и парсим его
+        m = re.search(r"\[.*\]", s, flags=re.S)
+        if not m:
+            raise ValueError("Ожидался JSON-массив")
+        data = json.loads(m.group(0))
+
     if not isinstance(data, list):
         raise ValueError("Ожидался JSON-массив")
     cleaned: List[Dict[str, str]] = []
@@ -176,11 +201,17 @@ def _build_values_prompt(position: str) -> str:
     return f"""
 ЗАДАЧА: Найти в Базе знаний точный список скиллов для профессии: "{position}".
 ОТВЕТ:
-- Пунктов всего должно быть 7-8.
+- ЕСЛИ подходящей профессии или точных пунктов «из базы» нет - всё равно верни 7–8 уместных пунктов, опираясь на свои знания о профессии.
+- НЕ пиши в ответе, что в базе чего-то нет, НЕ добавляй никаких пояснений, только JSON.
 - Не переводи пукнты на другие языки, отдавай ТОЛЬКО на том языке, как указано в базе знаний!
-- "label": 35–65 символов, если больше – пропусти.
 - Если в пункте всего 1 слово, можешь скомбинировать его с соседним пунктом через /, чтобы получилось 2-3 слова.
 ЗАПРЕТ: не использовать внешние знания.
+
+ТРЕБОВАНИЯ К СПИСКУ:
+- Пунктов всего должно быть 7-8.
+- "label": 35–65 символов, если больше – пропусти.
+- Если в пункте всего 1 слово, можешь скомбинировать его с соседним пунктом через "/" (2–3 слова).
+
 
 ФОРМАТ ОТВЕТА:
 [
