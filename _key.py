@@ -22,6 +22,22 @@ def continue_kb(next_key: str, label: str = " 🚀 Продолжить"):
     return kb.as_markup()
 
 
+def experience_intro_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="🚀 Продолжить",
+                callback_data="experience_continue"
+            ),
+            InlineKeyboardButton(
+                text="Нет опыта работы",
+                callback_data="experience_noexp"
+            ),
+        ]]
+    )
+
+
+
 def get_payment_keyboard(pay_url: str) -> InlineKeyboardMarkup:
     """
     • 1-я кнопка – сразу открывает форму PayNet
