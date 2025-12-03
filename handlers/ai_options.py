@@ -184,7 +184,7 @@ def _build_tasks_prompt(position: str, lang_code: str) -> str:
 ПРОВЕРКИ КАЧЕСТВА
 - Запрещены однословные или слишком общие метки («Тестирование», «Оптимизация») без уточнения.
 - Где уместно, добавляй лёгкий контекст («по чек-листу», «перед PR», «по стандарту смены», «в POS-системе», «по SLA»).
-- Если {lang_code} неизвестен — используй русский.
+- Если {lang_code} неизвестен — используй английский.
 
 ФОРМАТ ОТВЕТА (пример структуры, НЕ печатать сам пример):
 [
@@ -197,13 +197,13 @@ def _build_tasks_prompt(position: str, lang_code: str) -> str:
 
 
 # ==== main skills from file  ====
-def _build_values_prompt(position: str) -> str:
+def _build_values_prompt(position: str, lang_code: str) -> str:
     return f"""
 ЗАДАЧА: Найти в Базе знаний точный список скиллов для профессии: "{position}".
 ОТВЕТ:
 - ЕСЛИ подходящей профессии или точных пунктов «из базы» нет - всё равно верни 7–8 уместных пунктов, опираясь на свои знания о профессии.
 - НЕ пиши в ответе, что в базе чего-то нет, НЕ добавляй никаких пояснений, только JSON.
-- Не переводи пукнты на другие языки, отдавай ТОЛЬКО на том языке, как указано в базе знаний!
+- Отдавай пункты на языке: "{lang_code}". Если {lang_code} неизвестен — используй английский.
 - Если в пункте всего 1 слово, можешь скомбинировать его с соседним пунктом через /, чтобы получилось 2-3 слова.
 ЗАПРЕТ: не использовать внешние знания.
 
@@ -295,7 +295,7 @@ def _build_skills_hard_prompt(position: str, lang_code: str) -> str:
 Язык меток (label): "{lang_code}".
 
 ТРЕБОВАНИЯ:
-- Верни СТРОГО JSON-массив 7–12 объектов без пояснений и без бэктиков.
+- Верни СТРОГО JSON-массив 7–8 объектов без пояснений и без бэктиков.
 - Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<краткий навык на {lang_code}>"}}
 - "label": 1–3 слова, без кавычек и эмодзи, конкретные навыки/методики/области.
 - "value": латиница, kebab-case, уникальные.
@@ -328,6 +328,7 @@ def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
   ОБЯЗАТЕЛЬНО дай конкретные продукты слева, а класс — справа после "—".
 - Названия продуктов должны быть полностью читабельны в начале строки.
   Если строка получается длинной, СОКРАЩАЙ описательную часть после тире, но НЕ обрезай названия продуктов слева.
+- ВАЖНО: Названия продуктов (до тире) остаются на английском как есть, а описание ПОСЛЕ "—" СТРОГО на языке "{lang_code}".
 
 ТРЕБОВАНИЯ К СПИСКУ:
 - Из 7–8 пунктов МИНИМУМ 4 ДОЛЖНЫ содержать разные конкретные продукты/сервисы
@@ -346,6 +347,8 @@ def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
 - Убедись, что в начале каждого label стоят реальные названия ПО/сервисов.
 - Если видишь, что название продукта может быть обрезано, сократи описание после тире, а не имя продукта.
 - Не повторяй один и тот же продукт в разных пунктах без необходимости.
+- Описание инструмента после тире должно быть на языке "{lang_code}".
+
 
 ПРИМЕР СТРУКТУРЫ (НЕ печатать его, это только образец формата):
 [
@@ -478,7 +481,7 @@ async def generate_values_options(user_id: int) -> list[str] | None:
         lang_code = _map_lang_code(lang_answer)
         pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
-        prompt = _build_values_prompt(pos_norm)
+        prompt = _build_values_prompt(pos_norm, lang_code)
         raw    = await ask_llm(prompt, read_timeout=75.0, retries=1)
         items  = _parse_items(raw)
 
@@ -697,7 +700,7 @@ async def generate_skills_hard_options(user_id: int) -> list[str] | None:
         pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
         prompt = _build_skills_hard_prompt(pos_norm, lang_code)
-        raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
+        raw    = await ask_llm(prompt, read_timeout=120.0, retries=2)
         items  = _parse_items(raw)
 
         for it in items:
@@ -785,6 +788,8 @@ async def chain_generate_after_position(user_id: int):
             parts += ["", "Values:", "- " + "\n- ".join(value_labels)]
         if hard_labels:
             parts += ["", "Hard skills:", "- " + "\n- ".join(hard_labels)]
+        else:
+            parts += ["", "Hard skills: (generation failed - retry needed)"]
         if tools_labels:
             parts += ["", "Tools:", "- " + "\n- ".join(tools_labels)]
 
