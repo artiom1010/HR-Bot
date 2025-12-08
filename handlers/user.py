@@ -1187,13 +1187,8 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
                 return get_draft_value(s, user_id, parent_key=parent, step_key="experience_tasks") or ""
         tasks_text = (await asyncio.to_thread(_tasks_text)) or ""
 
-        await generate_experience_achievements_examples(
-            user_id,
-            role_norm or role,
-            tasks_text=tasks_text,
-            notify=True,
-        )
-        
+        # 🔔 ХУК: генерация достижений для опыта работы
+        await generate_experience_achievements_examples(user_id, role_norm or role, tasks_text=tasks_text, notify=True,)
         return
 
 
@@ -1307,6 +1302,17 @@ async def handle_exp_nav(callback: CallbackQuery):
         return
 
     if action == "next":
+        # def _next():
+        #     with Session(engine) as s:
+        #         return get_first_unanswered(s, user_id, QUESTION_FLOW)
+        # next_key = await asyncio.to_thread(_next)
+
+            # Помечаем experience как завершённый
+        def _mark_done():
+            with Session(engine) as s:
+                save_answer(s, user_id, "experience", "completed")
+        await asyncio.to_thread(_mark_done)
+        
         def _next():
             with Session(engine) as s:
                 return get_first_unanswered(s, user_id, QUESTION_FLOW)

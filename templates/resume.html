@@ -25,14 +25,14 @@
 
   {% if career_summary %}
   <section>
-    <h2>О СЕБЕ</h2>
+    <h2>{{ labels.about }}</h2>
     <p>{{ career_summary }}</p>
   </section>
   {% endif %}
 
   {% if experiences %}
   <section>
-    <h2>ОПЫТ РАБОТЫ</h2>
+    <h2>{{ labels.experience }}</h2>
     {% for exp in experiences %}
       <article class="exp">
         <!-- Таблица вместо flex — лучше переносится в DOCX -->
@@ -58,21 +58,21 @@
 
   {% if education_details %}
   <section>
-    <h2>ОБРАЗОВАНИЕ</h2>
+    <h2>{{ labels.education }}</h2>
     <div style="white-space: pre-line">{{ education_details }}</div>
   </section>
   {% endif %}
 
   {% if languages %}
   <section>
-    <h2>ЯЗЫКИ</h2>
+    <h2>{{ labels.languages }}</h2>
     <p>{{ languages }}</p>
   </section>
   {% endif %}
 
   {% if hard_skills or soft_skills %}
   <section>
-    <h2>НАВЫКИ</h2>
+    <h2>{{ labels.skills }}</h2>
     {% if hard_skills %}
       <p><strong>HARD SKILLS:</strong><br>{{ hard_skills }}</p>
     {% endif %}
