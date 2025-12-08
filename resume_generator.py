@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from weasyprint import HTML, CSS
 
-from _database import engine, ProcessedData
+from _database import engine, ProcessedData, Answer
 
 TEMPLATES_DIR = Path("templates")
 TEMPLATE_HTML = TEMPLATES_DIR / "resume.html"
@@ -49,16 +49,29 @@ def _row_to_context(row: ProcessedData) -> Dict[str, Any]:
     return context
 
 
+# def _render_html(context: dict) -> str:
+#     """
+#     Рендерит HTML-строку по шаблону Jinja2.
+#     """
+#     env = Environment(
+#         loader=FileSystemLoader(str(TEMPLATES_DIR)),
+#         autoescape=select_autoescape(["html", "xml"])
+#     )
+#     template = env.get_template(TEMPLATE_HTML.name)
+#     return template.render(**context)
+from labels import RESUME_LABELS
 def _render_html(context: dict) -> str:
-    """
-    Рендерит HTML-строку по шаблону Jinja2.
-    """
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
         autoescape=select_autoescape(["html", "xml"])
     )
     template = env.get_template(TEMPLATE_HTML.name)
-    return template.render(**context)
+    
+    # Получаем язык из контекста, по умолчанию русский
+    lang = context.get("resume_language", "ru")
+    labels = RESUME_LABELS.get(lang, RESUME_LABELS["ru"])
+    
+    return template.render(labels=labels, **context)
 
 
 def build_resume(order_id: int, make_pdf: bool = True, make_docx: bool = True) -> Optional[Dict[str, str]]:
@@ -68,16 +81,34 @@ def build_resume(order_id: int, make_pdf: bool = True, make_docx: bool = True) -
     """
     with Session(engine) as s:
         row = s.query(ProcessedData).filter_by(order_id=order_id).first()
-    if row is None:
-        return None
+        if row is None:
+            return None
+    
+        user_id = row.order.user_id
+        lang_answer = s.query(Answer).filter_by(
+            user_id=user_id, 
+            question_key="resume_language"
+        ).first()
 
-    # 2) Готовим контекст и HTML
-    context  = _row_to_context(row)
+        resume_lang = "ru"
+        if lang_answer and lang_answer.answer:
+            code = lang_answer.answer.split()[0].lower()  # "RU" → "ru"
+            if code in ("ru", "en", "ro"):
+                resume_lang = code
+
+        # 2) Готовим контекст и HTML
+        context  = _row_to_context(row)
+        context["resume_language"] = resume_lang
+        cv_naming = row.cv_naming
+
     html_out = _render_html(context)
 
     # 3) Подготавливаем имена и директории
     OUT_DIR.mkdir(exist_ok=True)
-    base_name = (row.cv_naming or f"resume_{order_id}").rsplit(".", 1)[0]
+
+    # base_name = (row.cv_naming or f"resume_{order_id}").rsplit(".", 1)[0]
+    base_name = (cv_naming or f"resume_{order_id}").rsplit(".", 1)[0]  # ← используем переменную
+    
     html_path = OUT_DIR / f"{base_name}.html"
     pdf_path  = OUT_DIR / f"{base_name}.pdf"
     docx_path = OUT_DIR / f"{base_name}.docx"
@@ -102,6 +133,10 @@ def build_resume(order_id: int, make_pdf: bool = True, make_docx: bool = True) -
     if make_docx:
         if shutil.which("pandoc") is None:
             raise RuntimeError("Pandoc не найден в PATH. Установи pandoc и повтори.")
+        # subprocess.run(
+        #     ["pandoc", str(html_path), "-o", str(docx_path)],
+        #     check=True
+        # )
         subprocess.run(
             [
                 "pandoc", str(html_path), "-t", "docx", "-o", str(docx_path),

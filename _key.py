@@ -26,11 +26,11 @@ def experience_intro_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[
             InlineKeyboardButton(
-                text="🚀 Продолжить",
+                text="🚀 Готов!",
                 callback_data="experience_continue"
             ),
             InlineKeyboardButton(
-                text="Нет опыта работы",
+                text="⏭ Нет опыта",
                 callback_data="experience_noexp"
             ),
         ]]

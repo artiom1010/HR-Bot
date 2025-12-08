@@ -21,7 +21,7 @@ CHOICES = {
     ],
     "resume_language": [
         ("ru", "RU — на Русском"), 
-        ("en", "ENG — in English"), 
+        ("en", "EN — in English"), 
         ("ro", "RO — în limba Română")
     ],
     "resume_goal": [
@@ -221,9 +221,8 @@ COURSES_INTRO = (
 )
 
 COURSES_ASK_TEXT = (
-    "Введи название курса или сертификата (по одному за раз).\n"
+    "1️⃣ Введи название курса или сертификата (по одному за раз).\n"
     "Например: Coursera: Machine Learning - 2023\n\n"
-    "Ты можешь добавить несколько - просто отправляй их по очереди.\n"
 )
 
 
