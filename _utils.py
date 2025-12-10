@@ -15,9 +15,9 @@ async def set_bot_commands(bot: Bot):
 
 CHOICES = {
     "main_language": [
-        ("main_ru", "🇷🇺 Русский"), 
-        ("main_en", "🇬🇧 English"), 
-        ("main_ro", "🇷🇴 Română")
+        ("main_ru", "🇷🇺 Русский")
+        # ("main_en", "🇬🇧 English"), 
+        # ("main_ro", "🇷🇴 Română")
     ],
     "resume_language": [
         ("ru", "RU — на Русском"), 
@@ -303,7 +303,7 @@ USE_KEYBOARD_MSG = """
 # =========================
 
 QUESTION_FLOW = [
-    ("main_language", "🌐 На каком языке тебе будет удобнее общаться со мной? \n(пока только русский)"),
+    ("main_language", "🌐 На каком языке тебе будет удобнее общаться со мной? \n"),
     
     ("resume_language", "📄 На каком языке ты хотел бы получить итоговое резюме?"),
     
