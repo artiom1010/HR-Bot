@@ -71,30 +71,12 @@ def _ensure_unique_7_8(items: List[Dict[str, str]], max_len: int = 56) -> List[D
     return out[:8]
 
 
-
-# def _parse_items(raw_text: str, *, max_len: int = 56) -> List[Dict[str, str]]:
-#     """Принимаем строку с JSON-массивом и возвращаем нормализованный список словарей."""
-#     data = json.loads(raw_text)
-#     if not isinstance(data, list):
-#         raise ValueError("Ожидался JSON-массив")
-#     cleaned: List[Dict[str, str]] = []
-#     for it in data:
-#         if not isinstance(it, dict):
-#             continue
-#         val = _slugify(it.get("value") or it.get("label", ""))
-#         lab = _clean_label(it.get("label", ""), max_len=max_len)
-#         if not lab:
-#             continue
-#         cleaned.append({"value": val, "label": lab})
-#     return _ensure_unique_7_8(cleaned, max_len=max_len)
 def _parse_items(raw_text: str, *, max_len: int = 56) -> List[Dict[str, str]]:
     """Принимаем строку с JSON-массивом и возвращаем нормализованный список словарей."""
     s = (raw_text or "").strip()
-    # 1) Пытаемся сразу распарсить как чистый JSON
     try:
         data = json.loads(s)
     except json.JSONDecodeError:
-        # 2) Фоллбек: ищем первый блок в квадратных скобках и парсим его
         m = re.search(r"\[.*\]", s, flags=re.S)
         if not m:
             raise ValueError("Ожидался JSON-массив")
