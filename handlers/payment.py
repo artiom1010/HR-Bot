@@ -13,24 +13,38 @@ from _pdf_generator_lo import generate_resume
 
 router = Router()
 
+from i18n import t
+def get_lang_by_chat_id(chat_id: int) -> str:
+    """Получает язык пользователя по telegram_id"""
+    with Session(engine) as s:
+        from _database import User
+        from handlers.db_helpers import get_user_lang
+        
+        user = s.query(User).filter_by(telegram_id=chat_id).first()
+        if not user:
+            return "ru"
+        return get_user_lang(s, user.id)
+
+
 async def send_resume(chat_id: int, order_id: int) -> None:
+    lang = await asyncio.to_thread(get_lang_by_chat_id, chat_id)
+
     with Session(engine) as s:
         order: Order | None = s.get(Order, order_id)
         if not order:
-            await bot.send_message(chat_id, "❌ Заказ не найден.")
+            await bot.send_message(chat_id, t("❌ Заказ не найден. Попробуйте /start", lang))
             return
         if order.user.telegram_id != chat_id:
-            await bot.send_message(chat_id, "❌ Это не ваш заказ.")
+            await bot.send_message(chat_id, t("❌ Это не ваш заказ. Попробуйте /start", lang))
             return
         if order.paynet_status is not PaynetStatus.paid:
             await bot.send_message(chat_id,
-                                   "💳 Оплата ещё не подтверждена.\n"
-                                   "Проверьте позже, пожалуйста.")
+                                   t("💳 Оплата ещё не подтверждена.\nПроверьте позже, пожалуйста.", lang))
             return
     paths = build_resume(order_id, make_pdf=True, make_docx=True)
 
     if not paths:
-        await bot.send_message(chat_id, "Не удалось подготовить файл резюме. Попробуйте позже.")
+        await bot.send_message(chat_id, t("Не удалось подготовить файл резюме. Попробуйте позже.", lang))
         return
 
     pdf_path  = paths.get("pdf")
@@ -38,46 +52,16 @@ async def send_resume(chat_id: int, order_id: int) -> None:
 
     await bot.send_message(
         chat_id,
-        "💼 Ваше резюме готово! Отправляю PDF и Word."
+        t("💼 Ваше резюме готово! Отправляю PDF и Word.", lang)
     )
     if pdf_path and Path(pdf_path).is_file():
-        await bot.send_document(chat_id, FSInputFile(pdf_path), caption="PDF-версия")
+        await bot.send_document(chat_id, FSInputFile(pdf_path), caption="PDF")
     if docx_path and Path(docx_path).is_file():
-        await bot.send_document(chat_id, FSInputFile(docx_path), caption="Word-версия (.docx)")
-    # pdf_path = generate_resume(order_id, to_pdf=True)
-    # if not pdf_path:
-    #     await bot.send_message(chat_id, "Не удалось подготовить файл резюме. Попробуйте позже.")
-    
-    # ext = Path(pdf_path).suffix.lower()
-    # if ext == ".pdf":
-    #     await bot.send_message(
-    #         chat_id,
-    #         "💼 Ваше индивидуальное резюме готово!\n"
-    #         "📂 Формат: PDF — готово к отправке HR прямо сейчас.\n\n"
-    #         "✨ Используйте этот документ как свой ключ к новым карьерным возможностям."
-    #     )
-    # else:
-    #     await bot.send_message(
-    #         chat_id,
-    #         "💼 Ваше индивидуальное резюме готово!\n"
-    #         "📂 Формат: Word — готово к отправке HR прямо сейчас.\n\n"
-    #         "✨ Используйте этот документ как свой ключ к новым карьерным возможностям."
-    #     )
-    # await bot.send_document(
-    #     chat_id,
-    #     FSInputFile(pdf_path),
-    #     caption=None
-    # )
-        
-
-# @router.callback_query(lambda c: c.data and c.data.startswith("download:"))
-# async def download_callback(callback: CallbackQuery):
-#     order_id = int(callback.data.split(":", 1)[1])
-#     await send_resume(callback.from_user.id, order_id)
-#     await callback.answer()
+        await bot.send_document(chat_id, FSInputFile(docx_path), caption="Word (.docx)")
 
 @router.callback_query(lambda c: c.data == "show_example")
 async def show_example_callback(callback: CallbackQuery):
-    await callback.message.answer("📎 Вот пример того, как будет выглядеть твоё резюме:")
+    lang = await asyncio.to_thread(get_lang_by_chat_id, callback.from_user.id)
+    await callback.message.answer(t( "📎 Вот пример того, как будет выглядеть твоё резюме:", lang))
     await callback.message.answer_document(FSInputFile("files/resume_example.pdf"))
     await callback.answer()
