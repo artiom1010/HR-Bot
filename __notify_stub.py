@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse
 from datetime import datetime
@@ -5,6 +6,7 @@ from _database import engine, Order, PaynetStatus
 from sqlalchemy.orm import Session
 from _key import get_download_keyboard
 from handlers.bot_app import bot
+from handlers.db_helpers import get_user_lang
 
 app = FastAPI()
 
@@ -59,11 +61,11 @@ async def paynet_notify(req: Request):
                 print("===> STATUS UPDATED & COMMITTED")
 
                 chat_id = order.user.telegram_id
+                lang = get_user_lang(session, order.user_id)
                 print("===> chat_id:", chat_id)
                 text = "💰 Payment received!\n\Click the button below to download the resume.."
-                kb = get_download_keyboard(order.id)
+                kb = get_download_keyboard(order.id, lang)
 
-                import asyncio
                 asyncio.create_task(bot.send_message(chat_id, text, reply_markup=kb))
                 print("===> MESSAGE SENT TASK CREATED")
             else:
