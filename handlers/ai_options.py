@@ -35,7 +35,7 @@ def _slugify(text: str) -> str:
     return t[:40] or "item"
 
 
-def _clean_label(label: str, max_len: int = 56) -> str:
+def _clean_label(label: str, max_len: int = 30) -> str:
     """
     Очищаем и аккуратно обрезаем label:
     - убираем переносы/кавычки;
@@ -54,7 +54,7 @@ def _clean_label(label: str, max_len: int = 56) -> str:
 
 
 
-def _ensure_unique_7_8(items: List[Dict[str, str]], max_len: int = 56) -> List[Dict[str, str]]:
+def _ensure_unique_7_8(items: List[Dict[str, str]], max_len: int = 30) -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
     seen = set()
     for it in items:
@@ -71,7 +71,7 @@ def _ensure_unique_7_8(items: List[Dict[str, str]], max_len: int = 56) -> List[D
     return out[:8]
 
 
-def _parse_items(raw_text: str, *, max_len: int = 56) -> List[Dict[str, str]]:
+def _parse_items(raw_text: str, *, max_len: int = 30) -> List[Dict[str, str]]:
     """Принимаем строку с JSON-массивом и возвращаем нормализованный список словарей."""
     s = (raw_text or "").strip()
     try:
@@ -88,7 +88,9 @@ def _parse_items(raw_text: str, *, max_len: int = 56) -> List[Dict[str, str]]:
     for it in data:
         if not isinstance(it, dict):
             continue
-        val = _slugify(it.get("value") or it.get("label", ""))
+        # val = _slugify(it.get("value") or it.get("label", ""))
+        raw_val = (it.get("value") or it.get("label", "")).strip()
+        val = _slugify(raw_val)
         lab = _clean_label(it.get("label", ""), max_len=max_len)
         if not lab:
             continue
@@ -144,34 +146,78 @@ def get_user_identity(user_id: int) -> tuple[str, str, int | None]:
 # =========================
 
 # ==== summery_tasks & summary_values ====
+# def _build_tasks_prompt(position: str, lang_code: str) -> str:
+#     return f"""
+# Сгенерируй РАБОЧИЕ ЗАДАЧИ (tasks) для роли "{position}".
+# Язык меток (label): "{lang_code}".
+# Если введённая роль неоднозначная (например: архитектор, дизайнер, инженер), не уточнённая пользователем — не додумывай, а воспринимай буквально, например не архитектор приложений, а архитектор просто! 
+
+# ТРЕБОВАНИЯ К ВЫВОДУ
+# - Верни СТРОГО JSON-массив из 8 объектов без пояснений и без бэктиков. Если вариант не проходит по длине — перегенерируй его,
+#   пока все 8 меток не будут ≤ 30 символов.
+# - Каждый объект: {{"value":"<slug-en-kebab>", "label":"<короткая фраза на {lang_code}>"}}
+# - "label":
+#   • 25–45 символов, НО верхняя граница абсолютная — 30, простая речь, без кавычек и эмодзи;
+#   • обязательно «действие + объект/контекст», а не одно слово;
+#   • начинай с глагола или отглагольной формы (напр. «Проводить код-ревью по чек-листу», «Поддерживать CI/CD пайплайн», «Обслуживать гостей по стандарту»).
+# - "value":
+#   • латиница, kebab-case, уникальные;
+#   • не отправляй по одному слову, должно быть полноценное детальное словосочетание;
+#   • 2–4 слов, отражающих суть действия (напр. "code-review-checklist", "maintain-ci-cd", "guest-service-standard").
+
+# ПРОВЕРКИ КАЧЕСТВА
+# - Запрещены однословные или слишком общие метки («Тестирование», «Оптимизация») без уточнения.
+# - Где уместно, добавляй лёгкий контекст («по чек-листу», «перед PR», «по стандарту смены», «в POS-системе», «по SLA»).
+# - Если {lang_code} неизвестен — используй английский.
+
+# ФОРМАТ ОТВЕТА (пример структуры, НЕ печатать сам пример):
+# [
+#   {{"value":"code-review-checklist","label":"Проводить код-ревью по чек-листу"}},
+#   {{"value":"write-unit-tests-before-pr","label":"Писать юнит-тесты перед PR"}}
+# ]
+# """.strip()
 def _build_tasks_prompt(position: str, lang_code: str) -> str:
     return f"""
 Сгенерируй РАБОЧИЕ ЗАДАЧИ (tasks) для роли "{position}".
 Язык меток (label): "{lang_code}".
-Если введённая роль неоднозначная (например: архитектор, дизайнер, инженер), не уточнённая пользователем — не додумывай, а воспринимай буквально, например не архитектор приложений, а архитектор просто! 
 
-ТРЕБОВАНИЯ К ВЫВОДУ
-- Верни СТРОГО JSON-массив из 8 объектов без пояснений и без бэктиков. Если вариант не проходит по длине — перегенерируй его,
-  пока все 8 меток не будут ≤ 56 символов.
-- Каждый объект: {{"value":"<slug-en-kebab>", "label":"<короткая фраза на {lang_code}>"}}
-- "label":
-  • 25–45 символов, НО верхняя граница абсолютная — 56, простая речь, без кавычек и эмодзи;
-  • обязательно «действие + объект/контекст», а не одно слово;
-  • начинай с глагола или отглагольной формы (напр. «Проводить код-ревью по чек-листу», «Поддерживать CI/CD пайплайн», «Обслуживать гостей по стандарту»).
-- "value":
-  • латиница, kebab-case, уникальные;
-  • не отправляй по одному слову, должно быть полноценное детальное словосочетание;
-  • 3–5 слов, отражающих суть действия (напр. "code-review-checklist", "maintain-ci-cd", "guest-service-standard").
+ТРЕБОВАНИЯ К ВЫВОДУ:
+- Верни СТРОГО JSON-массив из 8 объектов без пояснений и без бэктиков.
+- Каждый объект: {{"value":"<slug-en-kebab>", "label":"<фраза на {lang_code}>"}}
 
-ПРОВЕРКИ КАЧЕСТВА
-- Запрещены однословные или слишком общие метки («Тестирование», «Оптимизация») без уточнения.
-- Где уместно, добавляй лёгкий контекст («по чек-листу», «перед PR», «по стандарту смены», «в POS-системе», «по SLA»).
-- Если {lang_code} неизвестен — используй английский.
+ТРЕБОВАНИЯ К "label":
+- ГЛАВНОЕ: каждая фраза должна быть ЗАКОНЧЕННОЙ и понятной без контекста.
+- Формат: глагол + полное существительное + контекст (если нужен).
+  Примеры ПРАВИЛЬНО:
+  • "Проводить код-ревью по чек-листу"
+  • "Вести инструментальные занятия"
+  • "Готовить отчёты по продажам"
+  
+  Примеры НЕПРАВИЛЬНО (обрезанные):
+  • "Вести инструментальные" ❌ (непонятно — что именно?)
+  • "Анализировать данные для" ❌ (для чего?)
+  • "Проводить проверки качества" ✅ (но лучше: "Проверять качество данных")
 
-ФОРМАТ ОТВЕТА (пример структуры, НЕ печатать сам пример):
+- Длина: стремись к 25–35 символам, но ГЛАВНОЕ — законченность мысли.
+- Если не укладывается в 35 символов — сократи БЕЗ потери смысла:
+  "Проводить код-ревью по чек-листу" → "Проводить код-ревью"
+  "Вести инструментальные занятия" → "Вести занятия на инструментах" (если нужно короче)
+
+- Без кавычек, эмодзи, буллетов.
+
+ТРЕБОВАНИЯ К "value":
+- латиница, kebab-case, уникальные, 2–4 слова
+- отражает суть действия: "code-review", "instrument-lessons", "sales-reports"
+
+ЗАПРЕЩЕНО:
+- Однословные метки без контекста ("Оптимизация", "Тестирование")
+- Обрезанные фразы ("Вести инструментальные", "Анализировать данные для")
+- Слишком общие фразы — добавляй контекст где уместно
+
+ФОРМАТ ОТВЕТА (только JSON, без текста):
 [
-  {{"value":"code-review-checklist","label":"Проводить код-ревью по чек-листу"}},
-  {{"value":"write-unit-tests-before-pr","label":"Писать юнит-тесты перед PR"}}
+  {{"value":"code-review-process","label":"Task in {lang_code}"}},
+  {{"value":"instrument-lessons","label":"Task in {lang_code}"}}
 ]
 """.strip()
 
@@ -191,14 +237,14 @@ def _build_values_prompt(position: str, lang_code: str) -> str:
 
 ТРЕБОВАНИЯ К СПИСКУ:
 - Пунктов всего должно быть 7-8.
-- "label": 35–65 символов, если больше – пропусти.
-- Если в пункте всего 1 слово, можешь скомбинировать его с соседним пунктом через "/" (2–3 слова).
+- "label": ≤ 30 символов, если больше – пропусти.
+- Если в пункте всего 1 слово, можешь скомбинировать его с соседним пунктом через "/" (2–4 слова).
 
 
 ФОРМАТ ОТВЕТА:
 [
-  {{"value":"<slug-latin-kebab>","label":"[пункт из Skills CV bot]"}},
-  {{"value":"<slug-latin-kebab>","label":"[пункт из Skills CV bot]"}}
+  {{"value":"<slug-latin-kebab>","label":"[пункт из Skills CV bot - Лист1.pdf]"}},
+  {{"value":"<slug-latin-kebab>","label":"[пункт из Skills CV bot - Лист1.pdf]"}}
 ]
 """.strip()
 
@@ -207,30 +253,56 @@ def _build_values_prompt(position: str, lang_code: str) -> str:
 
 
 # ==== experience_tasks & experience_achievements ====
+# def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
+#     return f"""
+# Сгенерируй 7–8 рабочих ЗАДАЧ для должности "{role_title}".
+# Язык меток (label): "{lang_code}".
+# Если введённая должность неоднозначная (например: архитектор, дизайнер, инженер), не уточнённая пользователем — не додумывай, а воспринимай буквально, например не архитектор приложений, а архитектор просто! 
+
+# Требования к выводу:
+# - Верни СТРОГО JSON-массив из 7–8 объектов, без пояснений и без бэктиков. Если вариант не проходит по длине — перегенерируй его,
+#   пока все 8 меток не будут ≤ 30 символов.
+# - Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<короткая фраза на {lang_code}>"}}
+# - "label": ≤ 30 символов, НО верхняя граница абсолютная — 30, простая речь, без кавычек и эмодзи, обязательно «действие + объект/контекст».
+# - "value": латиница, kebab-case, уникальные, 2–4 слова.
+
+# Проверки качества:
+# - Запрещены однословные/слишком общие метки ("Оптимизация", "Коммуникации") без уточнения.
+# - Где уместно — добавь контекст: «в CRM», «по чек-листу смены», «по SLA», «в POS-системе», «воронка продаж» и т.п.
+
+# Формат ответа (пример структуры, НЕ печатать сам пример):
+# [
+#   {{"value":"crm-leads-proc","label":"Обрабатывать лиды в CRM"}},
+#   {{"value":"weekly-sales-rep","label":"Готовить отчётность по продажам"}}
+# ]
+# """.strip()
 def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
     return f"""
 Сгенерируй 7–8 рабочих ЗАДАЧ для должности "{role_title}".
 Язык меток (label): "{lang_code}".
-Если введённая должность неоднозначная (например: архитектор, дизайнер, инженер), не уточнённая пользователем — не додумывай, а воспринимай буквально, например не архитектор приложений, а архитектор просто! 
 
-Требования к выводу:
-- Верни СТРОГО JSON-массив из 7–8 объектов, без пояснений и без бэктиков. Если вариант не проходит по длине — перегенерируй его,
-  пока все 8 меток не будут ≤ 56 символов.
-- Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<короткая фраза на {lang_code}>"}}
-- "label": 25–45 символов, НО верхняя граница абсолютная — 56, простая речь, без кавычек и эмодзи, обязательно «действие + объект/контекст».
-- "value": латиница, kebab-case, уникальные, 2–3 слова.
+ТРЕБОВАНИЯ К "label":
+- ГЛАВНОЕ: каждая фраза должна быть ЗАКОНЧЕННОЙ и понятной.
+- Формат: глагол + полное существительное + контекст (если нужен).
+- Длина: стремись к 25–35 символам, но смысл важнее длины.
+- Если фраза длиннее 35 символов — сократи БЕЗ потери смысла.
 
-Проверки качества:
-- Запрещены однословные/слишком общие метки ("Оптимизация", "Коммуникации") без уточнения.
-- Где уместно — добавь контекст: «в CRM», «по чек-листу смены», «по SLA», «в POS-системе», «воронка продаж» и т.п.
+ПРИМЕРЫ ПРАВИЛЬНО:
+- "Обрабатывать лиды в CRM"
+- "Готовить отчёты по продажам"
+- "Проверять качество данных"
 
-Формат ответа (пример структуры, НЕ печатать сам пример):
+ПРИМЕРЫ НЕПРАВИЛЬНО:
+- "Вести инструментальные" ❌
+- "Анализировать данные для" ❌
+- "Проводить проверки" ❌ (проверки чего?)
+
+Верни СТРОГО JSON-массив из 7–8 объектов, без пояснений:
 [
-  {{"value":"crm-leads-proc","label":"Обрабатывать лиды в CRM"}},
-  {{"value":"weekly-sales-rep","label":"Готовить отчётность по продажам"}}
+  {{"value":"crm-leads-process","label":"Task in {lang_code}"}},
+  {{"value":"sales-reports","label":"Task in {lang_code}"}}
 ]
 """.strip()
-
 
 
 def _build_exp_achievements_from_tasks_prompt(role_title: str, tasks_text: str, lang_code: str) -> str:
@@ -271,23 +343,23 @@ def _build_exp_achievements_from_tasks_prompt(role_title: str, tasks_text: str, 
 
 
 # ==== skills_hard & skills_tools ====
-def _build_skills_hard_prompt(position: str, lang_code: str) -> str:
-    return f"""
-Сгенерируй профессиональные НАВЫКИ (hard skills) для резюме под позицию "{position}".
-Язык меток (label): "{lang_code}".
+# def _build_skills_hard_prompt(position: str, lang_code: str) -> str:
+#     return f"""
+# Сгенерируй профессиональные НАВЫКИ (hard skills) для резюме под позицию "{position}".
+# Язык меток (label): "{lang_code}".
 
-ТРЕБОВАНИЯ:
-- Верни СТРОГО JSON-массив 7–8 объектов без пояснений и без бэктиков.
-- Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<краткий навык на {lang_code}>"}}
-- "label": 1–3 слова, без кавычек и эмодзи, конкретные навыки/методики/области.
-- "value": латиница, kebab-case, уникальные.
+# ТРЕБОВАНИЯ:
+# - Верни СТРОГО JSON-массив 7–8 объектов без пояснений и без бэктиков.
+# - Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<краткий навык на {lang_code}>"}}
+# - "label": ≤ 30 символов, 2–4 слова, без кавычек и эмодзи, конкретные навыки/методики/области.
+# - "value": латиница, kebab-case, уникальные.
 
-ПРИМЕР СТРУКТУРЫ (НЕ печатать его):
-[
-  {{"value":"competency-interviews","label":"Интервью по компетенциям"}},
-  {{"value":"workforce-planning","label":"Планирование штата"}}
-]
-""".strip()
+# ПРИМЕР СТРУКТУРЫ (НЕ печатать его):
+# [
+#   {{"value":"competency-interviews","label":"Интервью по компетенциям"}},
+#   {{"value":"workforce-planning","label":"Планирование штата"}}
+# ]
+# """.strip()
 
 
 def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
@@ -302,40 +374,37 @@ def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
 - НЕ добавляй никакого текста до/после JSON-массива.
 
 СТРУКТУРА label:
-- В КАЖДОМ "label" СНАЧАЛА идут 1–2 конкретных продукта/сервиса/системы через " / ",
-  а уже ПОТОМ — короткое описание класса системы после тире.
+- В КАЖДОМ "label" СНАЧАЛА идут 1–2 конкретных продукта/сервиса/системы через " / ".
   Примеры формата (НЕ печатать их дословно, это только образцы):
-  • "1С:Медицина / MedOffice — системы управления мед. практикой"
+  • "1С:Медицина / MedOffice"
 - Если это класс систем, НЕ пиши только класс вроде "Системы управления медицинской практикой".
-  ОБЯЗАТЕЛЬНО дай конкретные продукты слева, а класс — справа после "—".
+  ОБЯЗАТЕЛЬНО дай конкретные продукты слева.
 - Названия продуктов должны быть полностью читабельны в начале строки.
-  Если строка получается длинной, СОКРАЩАЙ описательную часть после тире, но НЕ обрезай названия продуктов слева.
-- ВАЖНО: Названия продуктов (до тире) остаются на английском как есть, а описание ПОСЛЕ "—" СТРОГО на языке "{lang_code}".
+
+- ВАЖНО: Названия продуктов (до тире) остаются на английском.
 
 ТРЕБОВАНИЯ К СПИСКУ:
 - Из 7–8 пунктов МИНИМУМ 4 ДОЛЖНЫ содержать разные конкретные продукты/сервисы
   (их названия полностью видны слева до тире).
 - Остальные 3–4 пункта могут описывать классы систем, но всё равно начинаются с конкретных продуктов.
-- Разрешён максимум ОДИН базовый общий пункт типа "MS Office / Google Workspace — офисные пакеты".
+- Разрешён максимум ОДИН базовый общий пункт типа "MS Office / Google Workspace".
   Остальные пункты ДОЛЖНЫ содержать специализированные инструменты для роли "{position}".
 
 ТРЕБОВАНИЯ К "label":
-- 2–8 слов, без эмодзи и кавычек.
-- Формат строго: "<продукт1> [ / продукт2] — <краткое описание класса>".
+- ≤ 30 символов, 2–4 слов, без эмодзи и кавычек.
+- Формат строго: "<продукт1> [ / продукт2]".
 - Избегай пустых общих фраз ("Системы анализа данных", "Информационные системы")
   без конкретных продуктов слева.
 
 ПРОВЕРКИ КАЧЕСТВА (выполни мысленно, НЕ выводи):
 - Убедись, что в начале каждого label стоят реальные названия ПО/сервисов.
-- Если видишь, что название продукта может быть обрезано, сократи описание после тире, а не имя продукта.
 - Не повторяй один и тот же продукт в разных пунктах без необходимости.
-- Описание инструмента после тире должно быть на языке "{lang_code}".
 
 
 ПРИМЕР СТРУКТУРЫ (НЕ печатать его, это только образец формата):
 [
-  {{"value":"medesk-medoffice-practice","label":"Medesk / MedOffice — управление мед. практикой"}},
-  {{"value":"epic-cerner-emr","label":"Epic / Cerner — электронные медкарты"}}
+  {{"value":"medesk-medoffice-practice","label":"Medesk / MedOffice"}},
+  {{"value":"epic-cerner-emr","label":"Epic / Cerner"}}
 ]
 """.strip()
 
@@ -669,39 +738,39 @@ async def generate_experience_achievements_examples(
 
 
 
-@alert_on_exception(ttl=1)
-async def generate_skills_hard_options(user_id: int) -> list[str] | None:
-    """ИИ-подсказки для skills_hard на основе target_position."""
-    labels = None
-    try:
-        ctx = get_user_context(user_id)
-        position_raw = ctx.get("position") or ctx.get("target_position")  # на всякий
-        if not position_raw:
-            return None
-        lang_code = _map_lang_code(ctx.get("lang"))
-        pos_norm  = normalize_position(position_raw) or position_raw.strip()
+# @alert_on_exception(ttl=1)
+# async def generate_skills_hard_options(user_id: int) -> list[str] | None:
+#     """ИИ-подсказки для skills_hard на основе target_position."""
+#     labels = None
+#     try:
+#         ctx = get_user_context(user_id)
+#         position_raw = ctx.get("position") or ctx.get("target_position")  # на всякий
+#         if not position_raw:
+#             return None
+#         lang_code = _map_lang_code(ctx.get("lang"))
+#         pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
-        prompt = _build_skills_hard_prompt(pos_norm, lang_code)
-        raw    = await ask_llm(prompt, read_timeout=120.0, retries=2)
-        items  = _parse_items(raw)
+#         prompt = _build_skills_hard_prompt(pos_norm, lang_code)
+#         raw    = await ask_llm(prompt, read_timeout=120.0, retries=2)
+#         items  = _parse_items(raw)
 
-        for it in items:
-            it["value"] = _short_value_for_cb(it.get("value", ""), pos_norm)
+#         for it in items:
+#             it["value"] = _short_value_for_cb(it.get("value", ""), pos_norm)
 
-        inserted = replace_user_ai_options(
-            user_id=user_id,
-            question_key="skills_hard",
-            lang=lang_code,
-            position=pos_norm,        # ← ключ: привязываем к позиции
-            items=items,
-        )
-        log.info("user_id=%s: skills_hard inserted=%s lang=%s pos=%s",
-                 user_id, inserted, lang_code, pos_norm)
+#         inserted = replace_user_ai_options(
+#             user_id=user_id,
+#             question_key="skills_hard",
+#             lang=lang_code,
+#             position=pos_norm,        # ← ключ: привязываем к позиции
+#             items=items,
+#         )
+#         log.info("user_id=%s: skills_hard inserted=%s lang=%s pos=%s",
+#                  user_id, inserted, lang_code, pos_norm)
 
-        labels = [it["label"] for it in items if it.get("label")]
-    except Exception as e:
-        log.exception("user_id=%s: generate_skills_hard_options failed: %s", user_id, e)
-    return labels
+#         labels = [it["label"] for it in items if it.get("label")]
+#     except Exception as e:
+#         log.exception("user_id=%s: generate_skills_hard_options failed: %s", user_id, e)
+#     return labels
 
 
 @alert_on_exception(ttl=1)
@@ -749,8 +818,8 @@ async def chain_generate_after_position(user_id: int):
         await asyncio.sleep(2.0)
         value_labels = await generate_values_options(user_id)
         await asyncio.sleep(2.0)
-        hard_labels = await generate_skills_hard_options(user_id)
-        await asyncio.sleep(2.0)
+        # hard_labels = await generate_skills_hard_options(user_id)
+        # await asyncio.sleep(2.0)
         tools_labels = await generate_skills_tools_options(user_id)
 
         username, full_name, _ = get_user_identity(user_id)
@@ -768,8 +837,8 @@ async def chain_generate_after_position(user_id: int):
             parts += ["", "Tasks:", "- " + "\n- ".join(task_labels)]
         if value_labels:
             parts += ["", "Values:", "- " + "\n- ".join(value_labels)]
-        if hard_labels:
-            parts += ["", "Hard skills:", "- " + "\n- ".join(hard_labels)]
+        # if hard_labels:
+            # parts += ["", "Hard skills:", "- " + "\n- ".join(hard_labels)]
         else:
             parts += ["", "Hard skills: (generation failed - retry needed)"]
         if tools_labels:

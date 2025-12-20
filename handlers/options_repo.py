@@ -52,7 +52,7 @@ def get_user_context(user_id: int) -> dict:
 # ───────────────────────────
 # ОСНОВНОЕ API
 # ───────────────────────────
-
+from i18n import t
 def get_options(question_key: str, user_id: int | None, lang: str | None, position: str | None):
     """
     Возвращает пары (value, label) в приоритете:
@@ -61,6 +61,7 @@ def get_options(question_key: str, user_id: int | None, lang: str | None, positi
     3) ФОЛЛБЕК: CHOICES из utils.py (если в БД пусто).
     """
     pos_norm = normalize_position(position)
+    lang = lang or "ru"
 
     with Session(engine) as s:
         out: list[tuple[str, str]] = []
@@ -79,7 +80,7 @@ def get_options(question_key: str, user_id: int | None, lang: str | None, positi
                 if r.value in seen: 
                     continue
                 seen.add(r.value)
-                out.append((r.value, r.label))
+                out.append((r.value, t(r.label, lang)))
 
         # 2) глобальная статика из БД
         for r in s.query(AnswerOption).filter(
@@ -90,12 +91,13 @@ def get_options(question_key: str, user_id: int | None, lang: str | None, positi
             if r.value in seen:
                 continue
             seen.add(r.value)
-            out.append((r.value, r.label))
+            out.append((r.value, t(r.label, lang)))
 
     # 3) ФОЛЛБЕК: CHOICES (если из БД вообще ничего не набралось)
     if not out:
-        out = list(STATIC_CHOICES.get(question_key, []))
-
+        # out = list(STATIC_CHOICES.get(question_key, []))
+        choices = STATIC_CHOICES.get(question_key, [])
+        out = [(val, t(label, lang)) for val, label in choices]
     return out
 
 

@@ -213,3 +213,25 @@ def get_draft_value(s: Session, user_id: int, parent_key: str, step_key: str) ->
         .order_by(Draft.id.desc())
     ).scalars().first()
     return row
+
+
+
+# ==============
+# USER LANGUAGE
+# ==============
+LANG_MAP = {
+    "🇷🇺 Русский": "ru",
+    "🇬🇧 English": "en",
+    "🇷🇴 Română": "ro",
+}
+
+def get_user_lang(s: Session, user_id: int) -> str:
+    """Возвращает код языка пользователя (ru/en/ro). По умолчанию ru."""
+    answer = s.query(Answer).filter_by(
+        user_id=user_id, 
+        question_key="main_language"
+    ).first()
+    
+    if not answer:
+        return "ru"
+    return LANG_MAP.get(answer.answer, "ru")
