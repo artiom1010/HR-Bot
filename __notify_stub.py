@@ -63,7 +63,7 @@ async def paynet_notify(req: Request):
                 chat_id = order.user.telegram_id
                 lang = get_user_lang(session, order.user_id)
                 print("===> chat_id:", chat_id)
-                text = "💰 Payment received!\n\Click the button below to download the resume.."
+                text = "💰 Payment received!\nClick the button below to download the resume."
                 kb = get_download_keyboard(order.id, lang)
 
                 asyncio.create_task(bot.send_message(chat_id, text, reply_markup=kb))
