@@ -115,6 +115,17 @@ async def build_prompt(user_id: int) -> str:
 
 
 
+def _sanitize_json_string(s: str) -> str:
+    """Убирает обёртку ``` и возвращает чистый JSON."""
+    s = s.strip()
+    # Убираем ``` обёртку (с или без "json")
+    s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+    s = re.sub(r"\s*```$", "", s)
+    s = s.strip()
+    return s
+
+
+
 async def call_do_genai(prompt: str) -> dict | None:
     logger.info("PROMPT TO DO:\n%s", prompt)
 
@@ -146,13 +157,13 @@ async def call_do_genai(prompt: str) -> dict | None:
             raw_content = resp.json()["choices"][0]["message"]["content"]
             logger.info("RAW REPLY FROM DO:\n%r", raw_content)
 
-            # парсим JSON (с учётом ```…```)
             try:
-                data = json.loads(raw_content)
-            except json.JSONDecodeError:
-                cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", raw_content.strip())
-                cleaned = re.sub(r"\n?```$", "", cleaned).strip()
-                data = json.loads(cleaned)  # если снова упадёт — уйдёт в except ниже
+                cleaned = _sanitize_json_string(raw_content)
+                data = json.loads(cleaned)
+            except json.JSONDecodeError as e:
+                logger.error("GenAI вернул не‑JSON (попытка %s): %s", attempt+1, e)
+                await asyncio.sleep(0.8 * (attempt + 1))
+                continue
 
             # валидация/приведение
             for k in REQUIRED_KEYS:
@@ -173,15 +184,10 @@ async def call_do_genai(prompt: str) -> dict | None:
             data = {k: data.get(k, "") for k in REQUIRED_KEYS}
             return data
 
-        except json.JSONDecodeError as e:
-            logger.error("GenAI вернул не‑JSON (попытка %s): %s", attempt+1, e)
-            # без ретрая обычно смысла нет — но дадим 1 повтор
-            await asyncio.sleep(0.8 * (attempt + 1))
-
         except httpx.HTTPStatusError as e:
             # важное: логируем код и тело
             logger.error("DO HTTP %s: %s", e.response.status_code, e.response.text[:500])
-            return None  # статусная ошибка — повторять обычно бесполезно
+            return None
 
         except (httpx.TimeoutException, httpx.RequestError) as e:
             logger.warning("DO timeout/network (try %s/3): %s", attempt+1, e)
