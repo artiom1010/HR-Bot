@@ -440,7 +440,10 @@ async def handle_choice(callback: CallbackQuery):
 
                 base_key = step
                 label_db = get_label_for(s, base_key, value, user.id)
-                label = label_db or dict(CHOICES.get(base_key, [])).get(value, value)
+                label_raw = label_db or dict(CHOICES.get(base_key, [])).get(value, value)
+
+                lang = get_user_lang(s, user.id)
+                label = t(label_raw, lang)
 
                 add_draft(s, user.id, parent, step, label)
                 s.commit()
@@ -450,13 +453,17 @@ async def handle_choice(callback: CallbackQuery):
 
             # ▶ Подвопросы summary
             if key.startswith("summary_"):
-                label = get_label_for(s, key, value, user.id)
+                label_raw = get_label_for(s, key, value, user.id)
+                lang = get_user_lang(s, user.id)
+                label = t(label_raw, lang)
                 add_draft(s, user.id, "summary", key, label)
                 s.commit()
                 return user.id, "summary_step_saved", None, label
 
             # ♦ Обычные вопросы
-            label = dict(CHOICES.get(key, [])).get(value, value)
+            label_raw = dict(CHOICES.get(key, [])).get(value, value)
+            lang = get_user_lang(s, user.id)
+            label = t(label_raw, lang)
             save_answer(s, user.id, key, label)
             next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
             return user.id, next_key, None, label
