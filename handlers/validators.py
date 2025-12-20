@@ -2,6 +2,8 @@
 import re
 from typing import Tuple
 
+from i18n import t
+
 Name = Tuple[bool, str | None, str | None]  # ok, normalized, error_key
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -63,31 +65,31 @@ def validate_links(text: str) -> Name:
 # ──────────────────────────────────────────────────────────────────────────────
 # Основная функция валидации поля по его ключу
 # ──────────────────────────────────────────────────────────────────────────────
-def validate_field(current_key: str, text: str):
+def validate_field(current_key: str, text: str, lang: str = "ru"):
     ok, normalized, err = (True, text, None)
     hint = None
 
     if current_key == "full_name":
         ok, normalized, err = validate_full_name(text)
         if not ok and err == "bad_full_name":
-            hint = "🖋 Имя и фамилия — двумя словами. Пример: «Сергей Петренко»."
+            hint = t("🖋 Имя и фамилия — двумя словами. Пример: «Сергей Петренко».", lang)
 
     elif current_key == "contact_phone":
         ok, normalized, err = validate_phone(text)
         if not ok and err == "bad_phone":
-            hint = "📞 Введи номер цифрами (6–15 знаков). Пример: 067309067."
+            hint = t("📞 Введи номер цифрами (6–15 знаков). Пример: 067309067.", lang)
 
     elif current_key == "contact_email":
         ok, normalized, err = validate_email(text)
         if not ok and err == "bad_email":
-            hint = "✉️ Похоже, это не e-mail. Пример: m.greenwood@gmail.com"
+            hint = t("✉️ Похоже, это не e-mail. Пример: m.greenwood@gmail.com", lang)
 
     elif current_key == "contact_links":
         ok, normalized, err = validate_links(text)
         if not ok:
             if err == "bad_links_empty":
-                hint = "🔗 Добавь хотя бы одну ссылку. Пример: https://www.linkedin.com/jobs"
+                hint = t("🔗 Добавь хотя бы одну ссылку. Пример: https://www.linkedin.com/jobs", lang)
             elif err == "bad_links_format":
-                hint = "🔗 Каждая ссылка должна начинаться с http:// или https://"
+                hint = t("🔗 Каждая ссылка должна начинаться с http:// или https://", lang)
 
     return ok, normalized, err, hint

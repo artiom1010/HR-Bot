@@ -9,14 +9,13 @@ from handlers.db_helpers import (
     get_or_create_user, get_first_unanswered, get_drafts_values_ordered,
     save_answer, 
     clear_user_answers, clear_user_drafts, clear_user_answer_options,
-    clear_parent_drafts, 
+    clear_parent_drafts, get_draft_value,
     drafts_completed_count,
     drafts_count, add_draft, replace_draft,
-    pop_personal_wait,
-    set_personal_wait,
-    pop_free_wait,
-    set_free_wait,
-    get_draft_value)
+    pop_personal_wait, set_personal_wait,
+    pop_free_wait, set_free_wait,
+    get_user_lang
+    )
 
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
@@ -27,6 +26,7 @@ from handlers.ai_options import (
     generate_experience_achievements_examples)
 
 from _database import engine, User
+from i18n import t, t_choices
 
 from _key import (
     text_or_skip_keyboard, 
@@ -49,7 +49,21 @@ from _utils import (
     COURSES_INTRO, COURSES_ASK_TEXT,
     SKILLS_MSG_HARD, SKILLS_MSG_TOOLS, 
     LANGS_MSG, LANG_LIST, LANG_LEVELS,
-    PERSONAL_MESSAGE_POSITION, USE_KEYBOARD_MSG)
+    PERSONAL_MESSAGE_POSITION, USE_KEYBOARD_MSG,
+    KEYBOARD_ONLY_MSG)
+
+from _utils import (
+    MSG_ONLY_START, MSG_NO_EXPERIENCE,
+    MSG_THANKS_RESUME, MSG_ONLY_TEXT,
+    MSG_RATE_WORD_COUNT, MSG_POSITION_TOO_LONG, MSG_EXAMPLE_POSITION,
+    MSG_EXPERIENCE_TOO_LONG, MSG_EXAMPLE_EXPERIENCE, MSG_ALL_ANSWERS_DONE,
+    MSG_SAVED_VARIANTS, MSG_CHOOSE_LANG_LEVEL, MSG_CHOOSE_LVL,
+    MSG_ACHIEVEMENTS, MSG_ACHMENT_EXAMPLES, MSG_ONE_WORK,
+    MSG_MANY_WORKS, MSG_ONE_EDUCATION, MSG_MANY_EDUCATIONS,
+    MSG_MANY_COURSES, MSG_LANGUAGE_EXAMPLE, MSG_LANGUAGE_ADDED,
+    MSG_LANGUAGE_SAVED, MSG_LANGUAGE_CHOSEN, MSG_SAVING_PROGRESS,
+    MSG_CURRENTLY_SELECTED, MSG_ADD_MORE, MSG_CHOOSE_AT_LEAST_ONE
+)
 
 from handlers.ms_repo import (
     get_selected_set, 
@@ -66,7 +80,8 @@ router = Router()
 
 # --- constants --- 
 SUMMARY_SINGLE_WITH_PERSONAL = {"summary_industry"}
-MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks", "skills_hard", "skills_tools"}
+# MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks", "skills_hard", "skills_tools"}
+MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks", "skills_tools"}
 PAUSE_BEFORE = {"summary", "skills"}
 
 WORD_LIMIT = 100
@@ -123,7 +138,7 @@ def close_text_gate(user_id: int) -> None:
 def gate_for(user_id: int) -> str | None:
     return _text_gate.get(user_id)
 
-KEYBOARD_ONLY_MSG = "Пожалуйста, используй кнопки под сообщением."
+
 
 
 
@@ -168,23 +183,20 @@ def personal_msg_for(qkey: str) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 # Навигация по вопросам
 # ──────────────────────────────────────────────────────────────────────────────
-# async def send_next_with_intro(chat_id: int, next_key: str, user_id: int | None = None):
-#     intro = INTRO_BEFORE.get(next_key)
-#     if intro and next_key in PAUSE_BEFORE:
-#         await bot.send_message(chat_id, intro, reply_markup=continue_kb(next_key))
-#         if user_id:
-#             open_text_gate(user_id, f"intro:{next_key}")
-#         return
-#     if intro:
-#         await bot.send_message(chat_id, intro)
-#     await send_question(chat_id, next_key, user_id)
 async def send_next_with_intro(chat_id: int, next_key: str, user_id: int | None = None):
     # спец-случай для experience
+    
+    def _get_lang():
+        with Session(engine) as s:
+            return get_user_lang(s, user_id) if user_id else "ru"
+    lang = await asyncio.to_thread(_get_lang) if user_id else "ru"
+
+
     if next_key == "experience":
         await bot.send_message(
             chat_id,
-            INTRO_BEFORE["experience"],
-            reply_markup=experience_intro_kb()
+            t(INTRO_BEFORE["experience"], lang),
+            reply_markup=experience_intro_kb(lang),
         )
         if user_id:
             open_text_gate(user_id, "intro:experience")
@@ -192,28 +204,30 @@ async def send_next_with_intro(chat_id: int, next_key: str, user_id: int | None 
 
     intro = INTRO_BEFORE.get(next_key)
     if intro and next_key in PAUSE_BEFORE:
-        await bot.send_message(chat_id, intro, reply_markup=continue_kb(next_key))
+        await bot.send_message(chat_id, t(intro, lang), reply_markup=continue_kb(next_key, lang=lang))
         if user_id:
             open_text_gate(user_id, f"intro:{next_key}")
         return
     if intro:
-        await bot.send_message(chat_id, intro)
+        await bot.send_message(chat_id, t(intro, lang))
     await send_question(chat_id, next_key, user_id)
-
 
 
 @router.callback_query(F.data == "experience_continue")
 async def on_experience_continue(cb: CallbackQuery):
     tg_id = cb.from_user.id
 
-    def _uid():
+    def _get_user_and_lang():
         with Session(engine) as s:
-            u = s.query(User).filter_by(telegram_id=tg_id).first()
-            return u.id if u else None
-
-    user_id = await asyncio.to_thread(_uid)
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
+            if not user:
+                return None, "ru"
+            return user.id, get_user_lang(s, user.id)
+    
+    user_id, lang = await asyncio.to_thread(_get_user_and_lang)
+    
     if not user_id:
-        await cb.message.answer("Напиши /start сначала, пожалуйста.")
+        await cb.message.answer(t(MSG_ONLY_START, lang))
         return
 
     await cb.message.edit_reply_markup(reply_markup=None)
@@ -227,25 +241,27 @@ async def on_experience_noexp(cb: CallbackQuery):
 
     def _work():
         with Session(engine) as s:
-            u = s.query(User).filter_by(telegram_id=tg_id).first()
-            if not u:
-                return None
-            save_answer(s, u.id, "experience", "no_experience")
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
+            if not user:
+                return None, "ru"
+            save_answer(s, user.id, "experience", "no_experience")
             s.commit()
-            return u.id
+            lang = get_user_lang(s, user.id)
+            return user.id, lang
 
-    user_id = await asyncio.to_thread(_work)
+    user_id, lang = await asyncio.to_thread(_work)
+    
     if not user_id:
-        await cb.message.answer("Напиши /start сначала, пожалуйста.")
+        await cb.message.answer(t(MSG_ONLY_START, lang))
         return
 
     await cb.message.edit_reply_markup(reply_markup=None)
-    await cb.message.answer(
-        "👌 Окей, отметили, что у тебя пока нет опыта работы.\n"
-        "Перейдём сразу к образованию."
-    )
+    await cb.message.answer(t(MSG_NO_EXPERIENCE, lang))
     await send_next_with_intro(cb.message.chat.id, "education", user_id)
     await cb.answer()
+
+
+
 
 
 
@@ -259,10 +275,16 @@ async def send_first_question(chat_id: int, user_db_id: int):
 
 async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
     PROMPTS = dict(QUESTION_FLOW)
+    
+    # Получаем язык пользователя
+    def _get_lang():
+        with Session(engine) as s:  
+            return get_user_lang(s, user_id) if user_id else "ru"
+    lang = await asyncio.to_thread(_get_lang)
 
     # ▶ summary → мини-мастер
     if qkey == "summary" and user_id:
-        await bot.send_message(chat_id, PROMPTS[qkey])
+        await bot.send_message(chat_id, t(PROMPTS[qkey], lang))
         def _reset():
             with Session(engine) as s:
                 clear_parent_drafts(s, user_id, "summary")
@@ -287,7 +309,7 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
 
     # ▶ education → старт с клавиатурой
     if qkey == "education" and user_id:
-        await bot.send_message(chat_id, EDUCATION_INTRO, reply_markup=edu_start_kb())
+        await bot.send_message(chat_id, t(EDUCATION_INTRO, lang), reply_markup=edu_start_kb(lang))
         # здесь клавиатура → включаем ворота
         open_text_gate(user_id, "education")
         def _mark_done():
@@ -307,7 +329,7 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
             with Session(engine) as s:
                 save_answer(s, user_id, "courses", "")
         await asyncio.to_thread(_mark_done)
-        await bot.send_message(chat_id, COURSES_INTRO, reply_markup=courses_kb())
+        await bot.send_message(chat_id, t(COURSES_INTRO, lang), reply_markup=courses_kb(lang))
         # здесь клавиатура → включаем ворота
         open_text_gate(user_id, "courses")
         return
@@ -324,6 +346,7 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
 
     # Общий случай
     pairs = await asyncio.to_thread(get_options, qkey, user_id, None, None)
+    pairs = t_choices(pairs, lang)
     markup = None
 
     if qkey in MULTI_SELECT_KEYS and user_id and pairs:
@@ -332,28 +355,21 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
                 return get_selected_set(s, user_id, qkey)
         selected = await asyncio.to_thread(_sel)
         pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
-        markup = build_multiselect_kb(qkey, pairs, selected)
+        markup = build_multiselect_kb(qkey, pairs, selected, lang)
 
     elif pairs:
         allow_personal = qkey in SUMMARY_SINGLE_WITH_PERSONAL
-        markup = single_select_kb(qkey, pairs, allow_personal=allow_personal, per_row=1)
+        markup = single_select_kb(qkey, pairs, allow_personal=allow_personal, per_row=1, lang=lang)
 
     elif qkey in ("job_description", "contact_links"):
-        markup = text_or_skip_keyboard(qkey)
+        markup = text_or_skip_keyboard(qkey, lang)
 
-    await bot.send_message(chat_id, PROMPTS[qkey], reply_markup=markup)
+    await bot.send_message(chat_id, t(PROMPTS[qkey], lang), reply_markup=markup)
 
     # ВАЖНО: если это клавиатурный шаг — включаем ворота
     if user_id and markup:
-        # job_description/contact_links — явно текстовые, поэтому ворота не включаем
         if qkey not in ("job_description", "contact_links"):
             open_text_gate(user_id, qkey)
-
-
-
-
-
-
 
 
 
@@ -399,13 +415,13 @@ async def handle_choice(callback: CallbackQuery):
             logger.debug("edit_reply_markup skip: %s", e)
 
         if error == "no_user":
-            await callback.message.answer("Напишите /start сначала, пожалуйста.")
+            await callback.message.answer(t(MSG_ONLY_START, lang))
             return
 
         if next_key:
             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
         else:
-            await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
+            await callback.message.answer(t(MSG_THANKS_RESUME, lang))
             await create_order_and_run_ai(callback.message, user_id)
         return
 
@@ -455,11 +471,18 @@ async def handle_choice(callback: CallbackQuery):
         logger.debug("edit_reply_markup skip: %s", e)
 
     if error == "no_user":
-        await callback.message.answer("Напишите /start сначала, пожалуйста.")
+        await callback.message.answer(t(MSG_ONLY_START, lang))
         return
 
     if echo_label:
-        await callback.message.answer(f"🌟 Готово! Сохранил вариант(ы): {echo_label}")
+        # Получаем язык пользователя
+        def _get_lang():
+            with Session(engine) as s:
+                return get_user_lang(s, user_id) if user_id else "ru"
+        lang = await asyncio.to_thread(_get_lang)
+
+        translated_label = t(echo_label, lang)
+        await callback.message.answer(f"{t(MSG_SAVED_VARIANTS, lang)} {translated_label}")
 
     if isinstance(next_key, str) and next_key.startswith("__experience_title_saved__"):
         parent = next_key.split(":", 1)[1]
@@ -476,7 +499,7 @@ async def handle_choice(callback: CallbackQuery):
     if next_key:
         await send_next_with_intro(callback.message.chat.id, next_key, user_id)
     else:
-        await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
+        await callback.message.answer(t(MSG_THANKS_RESUME, lang))
         await create_order_and_run_ai(callback.message, user_id)
 
 
@@ -498,6 +521,36 @@ async def start_handler(message: Message):
     await message.answer(START_MESSAGE,reply_markup=start_keyboard())
 
 
+# @router.callback_query(F.data == "starts")
+# async def handle_start(callback: CallbackQuery):
+#     await callback.answer()
+#     try:
+#         await callback.message.edit_reply_markup(reply_markup=None)
+#     except Exception as e:
+#         logger.debug("edit_reply_markup skip: %s", e)
+
+#     tg_id = callback.from_user.id
+#     def _work():
+#         with Session(engine) as s:
+#             user = s.query(User).filter(User.telegram_id == tg_id).first()
+#             if not user:
+#                 user = get_or_create_user(s, tg_id, callback.from_user.username or "", callback.from_user.full_name or "")
+#             next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+#             return user.id, next_key
+
+#     def _get_lang():
+#         with Session(engine) as s:
+#             user = s.query(User).filter_by(telegram_id=tg_id).first()
+#             return get_user_lang(s, user.id) if user else "ru"
+#     lang = await asyncio.to_thread(_get_lang)
+
+#     user_id, next_key = await asyncio.to_thread(_work)
+
+#     if next_key:
+#         await send_next_with_intro(callback.message.chat.id, next_key, user_id)
+#     else:
+#         await callback.message.answer(t(MSG_THANKS_RESUME, lang))
+#         await create_order_and_run_ai(callback.message, user_id)
 @router.callback_query(F.data == "starts")
 async def handle_start(callback: CallbackQuery):
     await callback.answer()
@@ -507,22 +560,23 @@ async def handle_start(callback: CallbackQuery):
         logger.debug("edit_reply_markup skip: %s", e)
 
     tg_id = callback.from_user.id
+    
     def _work():
         with Session(engine) as s:
             user = s.query(User).filter(User.telegram_id == tg_id).first()
             if not user:
                 user = get_or_create_user(s, tg_id, callback.from_user.username or "", callback.from_user.full_name or "")
             next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
-            return user.id, next_key
+            lang = get_user_lang(s, user.id)  # 👈
+            return user.id, next_key, lang
 
-    user_id, next_key = await asyncio.to_thread(_work)
+    user_id, next_key, lang = await asyncio.to_thread(_work)  # 👈
 
     if next_key:
         await send_next_with_intro(callback.message.chat.id, next_key, user_id)
     else:
-        await callback.message.answer("🎉 Все вопросы уже собраны.\n\nИдёт генерация…")
+        await callback.message.answer(t(MSG_THANKS_RESUME, lang))
         await create_order_and_run_ai(callback.message, user_id)
-
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -530,7 +584,15 @@ async def handle_start(callback: CallbackQuery):
 # ──────────────────────────────────────────────────────────────────────────────
 @router.message(~F.text)  # любое не-текстовое
 async def handle_non_text(message: Message):
-    await message.answer("Я пока понимаю только текст 😊 Пришли, пожалуйста, текстом.")
+    def _get_lang():
+        with Session(engine) as s:
+            user = s.query(User).filter_by(telegram_id=message.from_user.id).first()
+            if not user:
+                return "ru"
+            return get_user_lang(s, user.id)
+    
+    lang = await asyncio.to_thread(_get_lang)
+    await message.answer(t(MSG_ONLY_TEXT, lang))
 
 def _limit_for_key(step_key: str | None) -> int:
     if not step_key:
@@ -594,7 +656,7 @@ def _finalize_multiselect_text(s, user_id: int, qkey: str, final_text: str):
 
 
 @router.message(F.text & ~F.text.startswith("/"))
-async def handle_answer(message: Message):
+async def handle_answer(message: Message, user_id: int | None = None):
     tg_id = message.from_user.id
     raw_text = (message.text or "").strip()
 
@@ -606,8 +668,15 @@ async def handle_answer(message: Message):
     user_id = await asyncio.to_thread(_uid)
 
     if not user_id:
-        await message.answer("Напиши /start сначала, пожалуйста.")
+        await message.answer(t(MSG_ONLY_START, lang))
         return
+    
+    # Получаем язык пользователя
+    def _get_lang():
+        with Session(engine) as s:
+            return get_user_lang(s, user_id) if user_id else "ru"
+    lang = await asyncio.to_thread(_get_lang)
+
 
     # ------- утилиты -------
     def _merge_ms_and_free(ms_text: str, user_text: str) -> str:
@@ -726,7 +795,7 @@ async def handle_answer(message: Message):
 
             # 8) валидация контактов
             if free_qkey in ("full_name", "contact_phone", "contact_email", "contact_links"):
-                ok, normalized, err, hint = validate_field(free_qkey, text_in)
+                ok, normalized, err, hint = validate_field(free_qkey, text_in, lang)
                 if not ok:
                     return user.id, None, "bad_input", hint
                 text_in = normalized
@@ -761,7 +830,7 @@ async def handle_answer(message: Message):
                 return user.id, None, "too_many_words", word_limit
 
             if current_key in ("full_name", "contact_phone", "contact_email", "contact_links"):
-                ok, normalized, err, hint = validate_field(current_key, text_in)
+                ok, normalized, err, hint = validate_field(current_key, text_in, lang)
                 if not ok:
                     return user.id, None, "bad_input", hint
                 text_to_save = normalized
@@ -801,41 +870,41 @@ async def handle_answer(message: Message):
 
     # ------- обработка ошибок -------
     if error == "no_user":
-        await message.answer("Напиши /start сначала, пожалуйста.")
+        await message.answer(t(MSG_ONLY_START, lang))
         return
 
     if error == "need_button":
         try:
             if _should_warn(user_id):
-                await message.answer(KEYBOARD_ONLY_MSG)
+                await message.answer(t(KEYBOARD_ONLY_MSG, lang))
         except NameError:
             await message.answer(
                 USE_KEYBOARD_MSG
                 if 'USE_KEYBOARD_MSG' in globals()
-                else "Пожалуйста, используй кнопки под сообщением."
+                else t(KEYBOARD_ONLY_MSG, lang)
             )
         return
 
     if error == "too_many_words":
-        await message.answer(f"💡 Сообщение длинновато. Давай уложимся в {payload} слов 🙂")
+        await message.answer(f"{t(MSG_RATE_WORD_COUNT, lang)} {payload}")
         return
     if error == "target_too_long":
         await message.answer(
-            f"💡 Название должности немного длинное. Давай уложим его в {TRGT_POSITION_MAX} символов.\n"
-            f"Например: «Product Manager», «Архитектор»."
+            f"{t(MSG_POSITION_TOO_LONG, lang)} {t(TRGT_POSITION_MAX, lang)}.\n"
+            f"{t(MSG_EXAMPLE_POSITION, lang)}"
         )
         return
     if error == "exp_title_too_long":
         await message.answer(
-            f"💡 Должность в опыте получилась длинной. Нужно до {EXP_POSITION_MAX} символов.\n"
-            f"Примеры: «QA», «Бариста», «Аналитик»."
+            f"{t(MSG_EXPERIENCE_TOO_LONG, lang)} {t(EXP_POSITION_MAX, lang)}.\n"
+            f"{t(MSG_EXAMPLE_EXPERIENCE, lang)}"
         )
         return
     if error == "bad_input":
         await message.answer(payload)
         return
     if error == "done":
-        await message.answer("Все ответы уже собраны. 🚀")
+        await message.answer(t(MSG_ALL_ANSWERS_DONE, lang))
         await create_order_and_run_ai(message, user_id)
         return
     
@@ -876,7 +945,8 @@ async def handle_answer(message: Message):
     if isinstance(payload, str) and payload.startswith("__echo__::"):
         saved_text = payload.split("::", 1)[1]
         if saved_text.strip():
-            await message.answer(f"🌟 Готово! Сохранил вариант(ы): {saved_text}")
+            label = t(saved_text, lang)
+            await message.answer(f"{t(MSG_SAVED_VARIANTS, lang)} {label}")
 
     if next_key == "__courses_step_saved__":
         await ask_next_courses_step(message.chat.id, user_id)
@@ -891,15 +961,15 @@ async def handle_answer(message: Message):
         return
 
     if next_key == "__ask_level_for_custom_lang__":
-        await message.answer(f"Язык: {payload or ''}\nТеперь выбери уровень:")
-        await bot.send_message(message.chat.id, "Уровень владения:", reply_markup=lang_levels_custom_kb())
+        # await message.answer(f"{payload or ''}\n{t(MSG_CHOOSE_LANG_LEVEL, lang)}")
+        await bot.send_message(message.chat.id, t(MSG_CHOOSE_LANG_LEVEL, lang), reply_markup=lang_levels_custom_kb(lang))
         return
 
     # обычный переход
     if next_key:
         await send_next_with_intro(message.chat.id, next_key, user_id)
     else:
-        await message.answer("🎉 Спасибо! Всё заполнено.\n\nРезюме генерируется ... (1-2 мин.)")
+        await message.answer(t(MSG_THANKS_RESUME, lang))
         await create_order_and_run_ai(message, user_id)
 
 
@@ -918,6 +988,33 @@ async def handle_answer(message: Message):
 # ──────────────────────────────────────────────────────────────────────────────
 # /new_interview — полная очистка
 # ──────────────────────────────────────────────────────────────────────────────
+# @router.message(Command("new_interview"))
+# async def new_interview_handler(message: Message):
+#     tg_id = message.from_user.id
+
+#     def _get_lang():
+#         with Session(engine) as s:
+#             user = s.query(User).filter_by(telegram_id=tg_id).first()
+#             return get_user_lang(s, user.id) if user else "ru"
+#     lang = await asyncio.to_thread(_get_lang)
+
+#     def _reset():
+#         with Session(engine) as s:
+#             user = s.query(User).filter(User.telegram_id == tg_id).first()
+#             if not user:
+#                 return None, 0
+#             deleted = clear_user_answers(s, user.id)
+#             clear_user_drafts(s, user.id)
+#             clear_user_answer_options(s, user.id)
+#             return user.id, deleted
+
+#     user_db_id, _ = await asyncio.to_thread(_reset)
+
+#     if not user_db_id:
+#         await message.answer(t(MSG_ONLY_START, lang))
+#         return
+
+#     await message.answer(t(START_MESSAGE, lang), reply_markup=start_keyboard())
 @router.message(Command("new_interview"))
 async def new_interview_handler(message: Message):
     tg_id = message.from_user.id
@@ -926,25 +1023,99 @@ async def new_interview_handler(message: Message):
         with Session(engine) as s:
             user = s.query(User).filter(User.telegram_id == tg_id).first()
             if not user:
-                return None, 0
+                return None, "ru"
             deleted = clear_user_answers(s, user.id)
             clear_user_drafts(s, user.id)
             clear_user_answer_options(s, user.id)
-            return user.id, deleted
+            lang = get_user_lang(s, user.id)  # 👈
+            return user.id, lang
 
-    user_db_id, _ = await asyncio.to_thread(_reset)
+    user_db_id, lang = await asyncio.to_thread(_reset)  # 👈
 
     if not user_db_id:
-        await message.answer("Напиши /start сначала, пожалуйста.")
+        await message.answer(t(MSG_ONLY_START, lang))
         return
 
-    await message.answer(START_MESSAGE, reply_markup=start_keyboard())
+    await message.answer(t(START_MESSAGE, lang), reply_markup=start_keyboard())
 
 
+# # ──────────────────────────────────────────────────────────────────────────────
+# # Кнопки «flow:...»
+# # ──────────────────────────────────────────────────────────────────────────────
+# @router.callback_query(F.data.startswith("flow:"))
+# async def handle_flow(callback: CallbackQuery):
+#     await callback.answer()
+#     try:
+#         _, action, key = callback.data.split(":", 2)
+#     except ValueError:
+#         return
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Кнопки «flow:...»
-# ──────────────────────────────────────────────────────────────────────────────
+#     tg_id = callback.from_user.id
+#     chat_id = callback.message.chat.id
+
+#     def _get_lang():
+#         with Session(engine) as s:
+#             user = s.query(User).filter_by(telegram_id=tg_id).first()
+#             return get_user_lang(s, user.id) if user else "ru"
+#     lang = await asyncio.to_thread(_get_lang)
+
+#     if action == "ask":
+#         try:
+#             await callback.message.edit_reply_markup(reply_markup=None)
+#         except Exception:
+#             pass
+#         def _mark_wait():
+#             with Session(engine) as s:
+#                 user = s.query(User).filter_by(telegram_id=tg_id).first()
+#                 if not user:
+#                     return None, None
+#                 wait_key = "courses::course_item" if key == "courses" else key
+#                 set_free_wait(s, user.id, wait_key)
+#                 s.commit()
+#                 return user.id, wait_key
+#         user_id, wait_key = await asyncio.to_thread(_mark_wait)
+#         if not user_id:
+#             await callback.message.answer("Press /start.")
+#             return
+#         close_text_gate(user_id) 
+#         msg = COURSES_ASK_TEXT if key == "courses" else personal_msg_for(wait_key)
+#         await callback.message.answer(t(msg, lang))
+#         return
+
+#     if action == "skip":
+#         def _work():
+#             with Session(engine) as s:
+#                 user = s.query(User).filter_by(telegram_id=tg_id).first()
+#                 if not user: 
+#                     return None, None
+#                 if key == "courses":
+#                     # собрать все курсы в одну строку и очистить черновики
+#                     from handlers.db_helpers import get_drafts_values_ordered
+#                     parts = get_drafts_values_ordered(s, user.id, "courses")
+#                     combined = " // ".join(parts) if parts else ""
+#                     save_answer(s, user.id, "courses", combined)
+#                     clear_parent_drafts(s, user.id, "courses")
+#                 else:
+#                     save_answer(s, user.id, key, "")
+#                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
+#                 return user.id, next_key
+            
+#         user_id, next_key = await asyncio.to_thread(_work)
+
+#         if not user_id:
+#             await callback.message.answer("Press /start.")
+#             return
+#         try:
+#             await callback.message.edit_reply_markup(reply_markup=None)
+#         except Exception:
+#             pass
+        
+#         close_text_gate(user_id)
+#         if next_key:
+#             await send_next_with_intro(chat_id, next_key, user_id)
+#         else:
+#             await callback.message.answer(t(MSG_THANKS_RESUME, lang))
+#             await create_order_and_run_ai(callback.message, user_id)
 @router.callback_query(F.data.startswith("flow:"))
 async def handle_flow(callback: CallbackQuery):
     await callback.answer()
@@ -961,22 +1132,26 @@ async def handle_flow(callback: CallbackQuery):
             await callback.message.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
+        
         def _mark_wait():
             with Session(engine) as s:
                 user = s.query(User).filter_by(telegram_id=tg_id).first()
                 if not user:
-                    return None, None
+                    return None, None, "ru"
                 wait_key = "courses::course_item" if key == "courses" else key
                 set_free_wait(s, user.id, wait_key)
                 s.commit()
-                return user.id, wait_key
-        user_id, wait_key = await asyncio.to_thread(_mark_wait)
+                lang = get_user_lang(s, user.id)  # 👈
+                return user.id, wait_key, lang
+        
+        user_id, wait_key, lang = await asyncio.to_thread(_mark_wait)  # 👈
+        
         if not user_id:
-            await callback.message.answer("Сначала /start.")
+            await callback.message.answer("Press /start.")
             return
         close_text_gate(user_id) 
         msg = COURSES_ASK_TEXT if key == "courses" else personal_msg_for(wait_key)
-        await callback.message.answer(msg)
+        await callback.message.answer(t(msg, lang))
         return
 
     if action == "skip":
@@ -984,9 +1159,8 @@ async def handle_flow(callback: CallbackQuery):
             with Session(engine) as s:
                 user = s.query(User).filter_by(telegram_id=tg_id).first()
                 if not user: 
-                    return None, None
+                    return None, None, "ru"
                 if key == "courses":
-                    # собрать все курсы в одну строку и очистить черновики
                     from handlers.db_helpers import get_drafts_values_ordered
                     parts = get_drafts_values_ordered(s, user.id, "courses")
                     combined = " // ".join(parts) if parts else ""
@@ -995,12 +1169,13 @@ async def handle_flow(callback: CallbackQuery):
                 else:
                     save_answer(s, user.id, key, "")
                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
-                return user.id, next_key
+                lang = get_user_lang(s, user.id)  # 👈
+                return user.id, next_key, lang
             
-        user_id, next_key = await asyncio.to_thread(_work)
+        user_id, next_key, lang = await asyncio.to_thread(_work)  # 👈
 
         if not user_id:
-            await callback.message.answer("Сначала /start.")
+            await callback.message.answer("Press /start.")
             return
         try:
             await callback.message.edit_reply_markup(reply_markup=None)
@@ -1011,7 +1186,7 @@ async def handle_flow(callback: CallbackQuery):
         if next_key:
             await send_next_with_intro(chat_id, next_key, user_id)
         else:
-            await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
+            await callback.message.answer(t(MSG_THANKS_RESUME, lang))
             await create_order_and_run_ai(callback.message, user_id)
 
 
@@ -1039,13 +1214,19 @@ async def handle_continue(callback: CallbackQuery):
             return u.id if u else None
     user_id = await asyncio.to_thread(_get_user_id)
     if not user_id:
-        await callback.message.answer("Сначала /start, пожалуйста.")
+        await callback.message.answer("Press /start")
         return
 
     await send_question(callback.message.chat.id, next_key, user_id)
 
 
 async def ask_next_summary_step(chat_id: int, user_id: int):
+    # Получаем lang
+    def _get_lang():
+        with Session(engine) as s:
+            return get_user_lang(s, user_id)
+    lang = await asyncio.to_thread(_get_lang)
+
     def _count():
         with Session(engine) as s:
             return drafts_completed_count(s, user_id, "summary")
@@ -1054,20 +1235,21 @@ async def ask_next_summary_step(chat_id: int, user_id: int):
     if idx < len(SUMMARY_STEPS):
         step_key, prompt = SUMMARY_STEPS[idx]
         pairs = await asyncio.to_thread(get_options, step_key, user_id, None, None)
+        pairs = t_choices(pairs, lang)  # 👈 переводим labels в кнопках
 
         if step_key in MULTI_SELECT_KEYS:
             def _sel():
                 with Session(engine) as s:
                     return get_selected_set(s, user_id, step_key)
             selected = await asyncio.to_thread(_sel)
-            markup = build_multiselect_kb(step_key, pairs, selected)
-            await bot.send_message(chat_id, prompt, reply_markup=markup)
+            markup = build_multiselect_kb(step_key, pairs, selected, lang)
+            await bot.send_message(chat_id, t(prompt, lang), reply_markup=markup)  # 👈 t()
             open_text_gate(user_id, step_key)
             return
 
         allow_personal = step_key in SUMMARY_SINGLE_WITH_PERSONAL
-        markup = single_select_kb(step_key, pairs, allow_personal=allow_personal, per_row=1)
-        await bot.send_message(chat_id, prompt, reply_markup=markup)
+        markup = single_select_kb(step_key, pairs, allow_personal=allow_personal, per_row=1, lang=lang)
+        await bot.send_message(chat_id, t(prompt, lang), reply_markup=markup)  # 👈 t()
         open_text_gate(user_id, step_key)
         return
     await finalize_summary_and_go_next(chat_id, user_id)
@@ -1081,13 +1263,14 @@ async def finalize_summary_and_go_next(chat_id: int, user_id: int):
             save_answer(s, user_id, "summary", combined)
             clear_parent_drafts(s, user_id, "summary")
             next_key = get_first_unanswered(s, user_id, QUESTION_FLOW)
-            return next_key
-    next_key = await asyncio.to_thread(_finalize)
+            lang = get_user_lang(s, user_id)
+            return next_key, lang
+    next_key, lang = await asyncio.to_thread(_finalize)
 
     if next_key:
         await send_next_with_intro(chat_id, next_key, user_id)
     else:
-        await bot.send_message(chat_id, "🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
+        await bot.send_message(chat_id, t(MSG_THANKS_RESUME, lang))
         await create_order_and_run_ai(chat_id, user_id)  # или твоя функция
 
 
@@ -1100,6 +1283,11 @@ EXPERIENCE_PROMPTS = dict(EXPERIENCE_STEPS)                # key -> текст
 
 async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 1):
     parent = f"exp{exp_index}"
+
+    def _get_lang():
+        with Session(engine) as s:
+            return get_user_lang(s, user_id)
+    lang = await asyncio.to_thread(_get_lang)
 
     def _count():
         with Session(engine) as s:
@@ -1122,13 +1310,14 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
                 s.commit()
         await asyncio.to_thread(_mark)
         close_text_gate(user_id)
-        await bot.send_message(chat_id, prompt)
+        await bot.send_message(chat_id, t(prompt, lang))
         return
 
     if step_key == "experience_title":
         pairs = await asyncio.to_thread(get_options, "experience_title", user_id, None, None)
-        markup = single_select_kb(f"{parent}::{step_key}", pairs, allow_personal=True, per_row=1)
-        await bot.send_message(chat_id, prompt, reply_markup=markup)
+        pairs = t_choices(pairs, lang)  # 👈
+        markup = single_select_kb(f"{parent}::{step_key}", pairs, allow_personal=True, per_row=1, lang=lang)
+        await bot.send_message(chat_id, t(prompt, lang), reply_markup=markup)  # 👈
         open_text_gate(user_id, f"{parent}::{step_key}")
         return
 
@@ -1139,7 +1328,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
                 s.commit()
         await asyncio.to_thread(_mark)
         close_text_gate(user_id)
-        await bot.send_message(chat_id, prompt)
+        await bot.send_message(chat_id, t(prompt, lang))
         return
 
     if step_key == "experience_tasks":
@@ -1147,19 +1336,19 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
             with Session(engine) as s:
                 return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
         role = (await asyncio.to_thread(_role)) or ""
-
         role_norm = normalize_position(role)
 
         logger.info("EXP TASKS: parent=%s, role=%r, user_id=%s", parent, role_norm, user_id)
         pairs = await asyncio.to_thread(get_options, "experience_tasks", user_id, None, role_norm)
+        pairs = t_choices(pairs, lang)  # 👈
 
         def _sel():
             with Session(engine) as s:
                 return get_selected_set(s, user_id, f"{parent}::{step_key}")
         selected = await asyncio.to_thread(_sel)
 
-        markup = build_multiselect_kb(f"{parent}::{step_key}", pairs, selected)
-        await bot.send_message(chat_id, prompt, reply_markup=markup)
+        markup = build_multiselect_kb(f"{parent}::{step_key}", pairs, selected, lang)
+        await bot.send_message(chat_id, t(prompt, lang), reply_markup=markup)
         open_text_gate(user_id, f"{parent}::{step_key}")
         return
 
@@ -1172,7 +1361,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
 
         await asyncio.to_thread(_mark)
         close_text_gate(user_id)
-        await bot.send_message(chat_id, prompt)
+        await bot.send_message(chat_id, t(prompt, lang))
 
         def _role():
             with Session(engine) as s:
@@ -1191,8 +1380,6 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
         await generate_experience_achievements_examples(user_id, role_norm or role, tasks_text=tasks_text, notify=True,)
         return
 
-
-
     if step_key == "experience_best_qualities":
         def _mark():
             with Session(engine) as s:
@@ -1201,15 +1388,8 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
 
         await asyncio.to_thread(_mark)
         close_text_gate(user_id)
-        await bot.send_message(chat_id, prompt)
+        await bot.send_message(chat_id, t(prompt, lang))
         return
-
-
-
-
-
-
-
 
     if step_key == "experience_achievements":
         def _mark():
@@ -1226,23 +1406,24 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
         role = (await asyncio.to_thread(_role)) or ""
         role_norm = normalize_position(role)
 
-        pairs = await asyncio.to_thread(get_options, "experience_achievements", user_id, None, role_norm)
+        pairs = await asyncio.to_thread(get_options, "experience_achievements", user_id, lang, role_norm)
 
         try:
-            labels = [lab for _, lab in (pairs or [])][:3]
+            # labels = [lab for _, lab in (pairs or [])][:3]
+            labels = [t(lab, lang) for _, lab in (pairs or [])][:3]
         except Exception:
             labels = []
 
         if not labels:
-            labels = ACHIEVEMENTS_FALLBACK_EXAMPLES
+            # labels = ACHIEVEMENTS_FALLBACK_EXAMPLES
+            labels = [t(ex, lang) for ex in ACHIEVEMENTS_FALLBACK_EXAMPLES]
 
-        examples_text = "\n".join(f"• {t}" for t in labels)
+        # examples_text = "\n".join(f"• {t}" for t in labels)
+        examples_text = "\n".join(f"• {lbl}" for lbl in labels)
 
         text = (
-            "5️⃣ Достижения — пришли 1–2.\n\n"
-            "Формула: действие + метрика + период + за счёт + эффект.\n"
-            "Вопросы: сколько? за какой срок? как сделал?\n\n"
-            + (f"Примеры для твоей роли «{role or role_norm or 'ваша роль'}»:\n" if (role or role_norm) else "Примеры:\n")
+            t(MSG_ACHIEVEMENTS, lang)
+            + (f"{t(MSG_ACHMENT_EXAMPLES, lang)} «{t(role or role_norm or '', lang)}»:\n" if (role or role_norm) else "\n")
             + examples_text
         )
         await bot.send_message(chat_id, text)
@@ -1255,20 +1436,82 @@ async def finalize_experience_and_choice(chat_id: int, user_id: int, exp_index: 
     def _collect_and_save():
         with Session(engine) as s:
             rows = get_drafts_values_ordered(s, user_id, parent)
-
             combined = " // ".join(rows) if rows else ""
             save_answer(s, user_id, f"experience_{exp_index}", combined)
             clear_parent_drafts(s, user_id, parent)
-    await asyncio.to_thread(_collect_and_save)
+            lang = get_user_lang(s, user_id)
+            return lang
+    lang = await asyncio.to_thread(_collect_and_save)
 
     if exp_index == 1:
-        done = "👍 Отлично! У нас уже есть 1 место работы."
+        done = t(MSG_ONE_WORK, lang)
     else:
-        done = f"👍 Отлично! У нас уже есть {exp_index} места(мест) работы."
-    await bot.send_message(chat_id, done, reply_markup=exp_finish_kb(exp_index + 1))
+        done = f"{t(MSG_MANY_WORKS, lang)} {exp_index}."
+    await bot.send_message(chat_id, done, reply_markup=exp_finish_kb(exp_index + 1, lang))
 
 
 
+# @router.callback_query(F.data.startswith("exp:"))
+# async def handle_exp_nav(callback: CallbackQuery):
+#     await callback.answer()
+#     parts = callback.data.split(":")
+#     action = parts[1]
+
+#     try:
+#         await callback.message.edit_reply_markup(reply_markup=None)
+#     except Exception:
+#         pass
+
+#     tg_id = callback.from_user.id
+#     def _get_user():
+#         with Session(engine) as s:
+#             u = s.query(User).filter_by(telegram_id=tg_id).first()
+#             return (u.id if u else None)
+#     user_id = await asyncio.to_thread(_get_user)
+
+#     def _get_lang():
+#         with Session(engine) as s:
+#             user = s.query(User).filter_by(telegram_id=tg_id).first()
+#             return get_user_lang(s, user.id) if user else "ru"
+#     lang = await asyncio.to_thread(_get_lang)
+
+#     if not user_id:
+#         await callback.message.answer("Press /start")
+#         return
+
+#     if action == "add":
+#         exp_index = int(parts[2])
+#         def _clr():
+#             with Session(engine) as s:
+#                 clear_parent_drafts(s, user_id, f"exp{exp_index}")
+#                 s.commit()
+#         await asyncio.to_thread(_clr)
+
+#         await ask_next_experience_step(callback.message.chat.id, user_id, exp_index=exp_index)
+#         return
+
+#     if action == "next":
+#         # def _next():
+#         #     with Session(engine) as s:
+#         #         return get_first_unanswered(s, user_id, QUESTION_FLOW)
+#         # next_key = await asyncio.to_thread(_next)
+
+#             # Помечаем experience как завершённый
+#         def _mark_done():
+#             with Session(engine) as s:
+#                 save_answer(s, user_id, "experience", "completed")
+#         await asyncio.to_thread(_mark_done)
+        
+#         def _next():
+#             with Session(engine) as s:
+#                 return get_first_unanswered(s, user_id, QUESTION_FLOW)
+#         next_key = await asyncio.to_thread(_next)
+
+#         if next_key:
+#             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
+#         else:
+#             await callback.message.answer(t(MSG_THANKS_RESUME, lang))
+#             await create_order_and_run_ai(callback.message, user_id)
 @router.callback_query(F.data.startswith("exp:"))
 async def handle_exp_nav(callback: CallbackQuery):
     await callback.answer()
@@ -1281,13 +1524,18 @@ async def handle_exp_nav(callback: CallbackQuery):
         pass
 
     tg_id = callback.from_user.id
-    def _get_user():
+    
+    def _get_user_and_lang():
         with Session(engine) as s:
-            u = s.query(User).filter_by(telegram_id=tg_id).first()
-            return (u.id if u else None)
-    user_id = await asyncio.to_thread(_get_user)
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
+            if not user:
+                return None, "ru"
+            return user.id, get_user_lang(s, user.id)
+    
+    user_id, lang = await asyncio.to_thread(_get_user_and_lang)
+
     if not user_id:
-        await callback.message.answer("Сначала /start, пожалуйста.")
+        await callback.message.answer("Press /start")
         return
 
     if action == "add":
@@ -1297,31 +1545,21 @@ async def handle_exp_nav(callback: CallbackQuery):
                 clear_parent_drafts(s, user_id, f"exp{exp_index}")
                 s.commit()
         await asyncio.to_thread(_clr)
-
         await ask_next_experience_step(callback.message.chat.id, user_id, exp_index=exp_index)
         return
 
     if action == "next":
-        # def _next():
-        #     with Session(engine) as s:
-        #         return get_first_unanswered(s, user_id, QUESTION_FLOW)
-        # next_key = await asyncio.to_thread(_next)
-
-            # Помечаем experience как завершённый
-        def _mark_done():
+        def _mark_and_next():
             with Session(engine) as s:
                 save_answer(s, user_id, "experience", "completed")
-        await asyncio.to_thread(_mark_done)
-        
-        def _next():
-            with Session(engine) as s:
                 return get_first_unanswered(s, user_id, QUESTION_FLOW)
-        next_key = await asyncio.to_thread(_next)
+        
+        next_key = await asyncio.to_thread(_mark_and_next)
 
         if next_key:
             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
         else:
-            await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
+            await callback.message.answer(t(MSG_THANKS_RESUME, lang))
             await create_order_and_run_ai(callback.message, user_id)
 
 
@@ -1334,6 +1572,12 @@ EDUCATION_PROMPTS = dict(EDUCATION_STEPS)
 
 async def ask_next_education_step(chat_id: int, user_id: int, edu_index: int = 1):
     parent = f"edu{edu_index}"
+
+    # Получаем lang
+    def _get_lang():
+        with Session(engine) as s:
+            return get_user_lang(s, user_id)
+    lang = await asyncio.to_thread(_get_lang)
 
     def _count():
         with Session(engine) as s:
@@ -1352,7 +1596,7 @@ async def ask_next_education_step(chat_id: int, user_id: int, edu_index: int = 1
             set_free_wait(s, user_id, f"{parent}::{step_key}")
             s.commit()
     await asyncio.to_thread(_mark)
-    await bot.send_message(chat_id, prompt)
+    await bot.send_message(chat_id, t(prompt, lang))
 
 
 async def finalize_education_and_choice(chat_id: int, user_id: int, edu_index: int):
@@ -1365,15 +1609,75 @@ async def finalize_education_and_choice(chat_id: int, user_id: int, edu_index: i
             combined = " // ".join(rows) if rows else ""
             save_answer(s, user_id, f"education_{edu_index}", combined)
             clear_parent_drafts(s, user_id, parent)
-    await asyncio.to_thread(_collect_and_save)
+            lang = get_user_lang(s, user_id)
+            return lang
+    lang = await asyncio.to_thread(_collect_and_save)
 
     if edu_index == 1:
-        done = "👍 Отлично! У нас уже есть 1 образование."
+        done = t(MSG_ONE_EDUCATION, lang)
     else:
-        done = f"👍 Отлично! У нас уже есть {edu_index} образования."
-    await bot.send_message(chat_id, done, reply_markup=edu_finish_kb(edu_index + 1))
+        done = f"{t(MSG_MANY_EDUCATIONS, lang)} {edu_index}."
+    await bot.send_message(chat_id, done, reply_markup=edu_finish_kb(edu_index + 1, lang))
 
 
+# @router.callback_query(F.data.startswith("edu:"))
+# async def handle_edu_nav(callback: CallbackQuery):
+#     await callback.answer()
+#     parts = callback.data.split(":")
+#     action = parts[1]
+
+#     try:
+#         await callback.message.edit_reply_markup(reply_markup=None)
+#     except Exception:
+#         pass
+#     tg_id = callback.from_user.id
+#     def _get_user():
+#         with Session(engine) as s:
+#             u = s.query(User).filter_by(telegram_id=tg_id).first()
+#             return (u.id if u else None)
+#     user_id = await asyncio.to_thread(_get_user)
+
+#     def _get_lang():
+#         with Session(engine) as s:
+#             user = s.query(User).filter_by(telegram_id=tg_id).first()
+#             return get_user_lang(s, user.id) if user else "ru"
+#     lang = await asyncio.to_thread(_get_lang)
+
+
+#     if not user_id:
+#         await callback.message.answer("Press /start")
+#         return
+
+#     if action == "start":
+#         edu_index = int(parts[2]) if len(parts) > 2 else 1
+#         def _clr():
+#             with Session(engine) as s:
+#                 clear_parent_drafts(s, user_id, f"edu{edu_index}")
+#                 s.commit()
+#         await asyncio.to_thread(_clr)
+#         await ask_next_education_step(callback.message.chat.id, user_id, edu_index=edu_index)
+#         return
+
+#     if action == "add":
+#         edu_index = int(parts[2])
+#         def _clr():
+#             with Session(engine) as s:
+#                 clear_parent_drafts(s, user_id, f"edu{edu_index}")
+#                 s.commit()
+#         await asyncio.to_thread(_clr)
+#         await ask_next_education_step(callback.message.chat.id, user_id, edu_index=edu_index)
+#         return
+
+#     if action == "next":
+#         def _next():
+#             with Session(engine) as s:
+#                 return get_first_unanswered(s, user_id, QUESTION_FLOW)
+#         next_key = await asyncio.to_thread(_next)
+#         if next_key:
+#             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
+#         else:
+#             await callback.message.answer(t(MSG_THANKS_RESUME, lang))
+#             await create_order_and_run_ai(callback.message, user_id)
 @router.callback_query(F.data.startswith("edu:"))
 async def handle_edu_nav(callback: CallbackQuery):
     await callback.answer()
@@ -1384,14 +1688,20 @@ async def handle_edu_nav(callback: CallbackQuery):
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
+    
     tg_id = callback.from_user.id
-    def _get_user():
+    
+    def _get_user_and_lang():
         with Session(engine) as s:
-            u = s.query(User).filter_by(telegram_id=tg_id).first()
-            return (u.id if u else None)
-    user_id = await asyncio.to_thread(_get_user)
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
+            if not user:
+                return None, "ru"
+            return user.id, get_user_lang(s, user.id)
+    
+    user_id, lang = await asyncio.to_thread(_get_user_and_lang)
+
     if not user_id:
-        await callback.message.answer("Сначала /start, пожалуйста.")
+        await callback.message.answer("Press /start")
         return
 
     if action == "start":
@@ -1422,9 +1732,8 @@ async def handle_edu_nav(callback: CallbackQuery):
         if next_key:
             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
         else:
-            await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ... (1-2 мин)")
+            await callback.message.answer(t(MSG_THANKS_RESUME, lang))
             await create_order_and_run_ai(callback.message, user_id)
-
 
 
 
@@ -1433,6 +1742,12 @@ async def handle_edu_nav(callback: CallbackQuery):
 # Мастер courses
 # ──────────────────────────────────────────────────────────────────────────────
 async def ask_next_courses_step(chat_id: int, user_id: int):
+    # Получаем lang
+    def _get_lang():
+        with Session(engine) as s:
+            return get_user_lang(s, user_id)
+    lang = await asyncio.to_thread(_get_lang)
+    
     # считаем, сколько черновиков уже набрали
     def _count():
         with Session(engine) as s:
@@ -1440,8 +1755,8 @@ async def ask_next_courses_step(chat_id: int, user_id: int):
     n = await asyncio.to_thread(_count)
 
     # показываем «👍 уже N курсов» и те же кнопки: [+ Добавить курс] / [⏭ Далее]
-    text = f"👍 Отлично! У нас уже есть {n} курс{'а' if 1 < n < 5 else '' if n==1 else 'ов'}."
-    await bot.send_message(chat_id, text, reply_markup=courses_kb())
+    text = f"{t(MSG_MANY_COURSES, lang)} {n}."
+    await bot.send_message(chat_id, text, reply_markup=courses_kb(lang))
 
 
 
@@ -1450,12 +1765,18 @@ async def ask_next_courses_step(chat_id: int, user_id: int):
 # Мастер skills
 # ──────────────────────────────────────────────────────────────────────────────
 SKILLS_STEPS = [
-    ("skills_hard",  SKILLS_MSG_HARD),
+    # ("skills_hard",  SKILLS_MSG_HARD),
     ("skills_tools", SKILLS_MSG_TOOLS),
     ("skills_langs", LANGS_MSG),
 ]
 
 async def ask_next_skills_step(chat_id: int, user_id: int):
+    # Получаем lang
+    def _get_lang():
+        with Session(engine) as s:
+            return get_user_lang(s, user_id)
+    lang = await asyncio.to_thread(_get_lang)
+
     def _count():
         with Session(engine) as s:
             return drafts_completed_count(s, user_id, "skills")
@@ -1465,23 +1786,25 @@ async def ask_next_skills_step(chat_id: int, user_id: int):
         step_key, prompt = SKILLS_STEPS[idx]
 
         # 1-2 шаги — мультивыбор
-        if step_key in {"skills_hard", "skills_tools"}:
+        # if step_key in {"skills_hard", "skills_tools"}:
+        if step_key in {"skills_tools"}:
             ctx = await asyncio.to_thread(get_user_context, user_id)
             raw_pos = (ctx.get("position") or ctx.get("target_position") or "").strip()
             pos_norm = normalize_position(raw_pos) if raw_pos else None
             pairs = await asyncio.to_thread(get_options, step_key, user_id, None, pos_norm)
+            pairs = t_choices(pairs, lang)  # 👈 переводим labels в кнопках       
             def _sel():
                 with Session(engine) as s:
                     return get_selected_set(s, user_id, step_key)
             selected = await asyncio.to_thread(_sel)
-            markup = build_multiselect_kb(step_key, pairs, selected)
-            await bot.send_message(chat_id, prompt, reply_markup=markup)
+            markup = build_multiselect_kb(step_key, pairs, selected, lang)
+            await bot.send_message(chat_id, t(prompt, lang), reply_markup=markup)
             open_text_gate(user_id, step_key)
             return
 
         # 3 шаг — языки
         if step_key == "skills_langs":
-            await bot.send_message(chat_id, prompt, reply_markup=lang_actions_kb())
+            await bot.send_message(chat_id, t(prompt, lang), reply_markup=lang_actions_kb(lang))
             open_text_gate(user_id, step_key)
             return
 
@@ -1497,11 +1820,12 @@ def _make_langs_text(raw: str) -> str:
 async def finalize_skills_and_go_next(chat_id: int, user_id: int):
     def _finish():
         with Session(engine) as s:
-            hard  = (get_draft_value(s, user_id, "skills", "skills_hard")  or "").strip()
+            # hard  = (get_draft_value(s, user_id, "skills", "skills_hard")  or "").strip()
             tools = (get_draft_value(s, user_id, "skills", "skills_tools") or "").strip()
             langs = (get_draft_value(s, user_id, "skills", "skills_langs") or "").strip()
 
-            skills_text = " // ".join([p for p in [hard, tools] if p])
+            # skills_text = " // ".join([p for p in [hard, tools] if p])
+            skills_text = " // ".join([p for p in [tools] if p])
             langs_text  = _make_langs_text(langs) if langs else ""
 
             if skills_text:
@@ -1511,13 +1835,14 @@ async def finalize_skills_and_go_next(chat_id: int, user_id: int):
 
             clear_parent_drafts(s, user_id, "skills")
             next_key = get_first_unanswered(s, user_id, QUESTION_FLOW)
-            return next_key
+            lang = get_user_lang(s, user_id)
+            return next_key, lang
 
-    next_key = await asyncio.to_thread(_finish)
+    next_key, lang = await asyncio.to_thread(_finish)
     if next_key:
         await send_next_with_intro(chat_id, next_key, user_id)
     else:
-        await bot.send_message(chat_id, "🎉 Спасибо! Всё заполнено.\n\nРезюме генерируется ... (1–2 мин.)")
+        await bot.send_message(chat_id, t(MSG_THANKS_RESUME, lang))
         await create_order_and_run_ai(chat_id, user_id)
 
 
@@ -1557,13 +1882,17 @@ async def handle_lang(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     tg_id = callback.from_user.id
 
-    def _get_uid():
+    def _get_user_and_lang():
         with Session(engine) as s:
-            u = s.query(User).filter_by(telegram_id=tg_id).first()
-            return (u.id if u else None)
-    user_id = await asyncio.to_thread(_get_uid)
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
+            if not user:
+                return None, "ru"
+            return user.id, get_user_lang(s, user.id)
+    
+    user_id, lang = await asyncio.to_thread(_get_user_and_lang)
+    
     if not user_id:
-        await callback.message.answer("Сначала /start.")
+        await callback.message.answer("Press /start.")
         return
 
     try:
@@ -1573,14 +1902,14 @@ async def handle_lang(callback: CallbackQuery):
 
     # UI-переходы
     if action == "add":
-        await callback.message.edit_reply_markup(reply_markup=lang_choose_kb())
+        await callback.message.edit_reply_markup(reply_markup=lang_choose_kb(lang))
         return
     if action == "back":
-        await callback.message.edit_reply_markup(reply_markup=lang_actions_kb())
+        await callback.message.edit_reply_markup(reply_markup=lang_actions_kb(lang))
         return
     if action == "pick":
         code = rest[0]
-        await callback.message.edit_reply_markup(reply_markup=lang_levels_kb(code))
+        await callback.message.edit_reply_markup(reply_markup=lang_levels_kb(code, lang))
         return
 
     # 👤 Кастомный язык — просим текстом
@@ -1595,7 +1924,7 @@ async def handle_lang(callback: CallbackQuery):
         except Exception:
             pass
         close_text_gate(user_id)
-        await callback.message.answer("Напиши язык (например: Польский, Итальянский).")
+        await callback.message.answer(t(MSG_LANGUAGE_EXAMPLE, lang))
         return
 
     # Выбор уровня для языка из списка
@@ -1604,18 +1933,17 @@ async def handle_lang(callback: CallbackQuery):
         lang_label = dict(LANG_LIST).get(code, code)
         lvl_label  = dict(LANG_LEVELS).get(lvl_code, lvl_code)
 
-        pair = f"{lang_label} – {lvl_label}"
+        pair = f"{t(lang_label, lang)} – {t(lvl_label, lang)}"  # 👈
 
         def _save_pair():
             with Session(engine) as s:
                 return _upsert_lang_pair(s, user_id, lang_label, lvl_label)
 
         await asyncio.to_thread(_save_pair)
-        await callback.answer(f"✅ Добавлено: {pair}", show_alert=False)
-        extra = await asyncio.to_thread(_current_langs_text, user_id)
-        text = LANGS_MSG + extra
-        await callback.message.edit_text(text, reply_markup=lang_actions_kb())
-        await callback.answer("✅ Сохранено", show_alert=False)
+        await callback.answer(f"{t(MSG_LANGUAGE_ADDED, lang)} {pair}", show_alert=False)
+        extra = await asyncio.to_thread(_current_langs_text, user_id, lang)  # 👈 передаём lang
+        text = t(LANGS_MSG, lang) + extra  # 👈
+        await callback.message.edit_text(text, reply_markup=lang_actions_kb(lang))
         return
 
     # Выбор уровня для КАСТОМНОГО языка
@@ -1631,11 +1959,10 @@ async def handle_lang(callback: CallbackQuery):
                 return lang_label
 
         lang_label = await asyncio.to_thread(_finish_custom)
-        await callback.answer(f"✅ {lang_label} – {lvl_label}", show_alert=False)
-        extra = await asyncio.to_thread(_current_langs_text, user_id)
-        text = LANGS_MSG + extra
-        await callback.message.edit_text(text, reply_markup=lang_actions_kb())
-        await callback.answer("✅ Сохранено", show_alert=False)
+        await callback.answer(f"✅ {lang_label} – {t(lvl_label, lang)}", show_alert=False)  # 👈
+        extra = await asyncio.to_thread(_current_langs_text, user_id, lang)  # 👈
+        text = t(LANGS_MSG, lang) + extra  # 👈
+        await callback.message.edit_text(text, reply_markup=lang_actions_kb(lang))
         return
 
     # Готово / пропустить
@@ -1644,17 +1971,54 @@ async def handle_lang(callback: CallbackQuery):
         await finalize_skills_and_go_next(chat_id, user_id)
         return
 
-def _current_langs_text(user_id: int) -> str:
+
+def _current_langs_text(user_id: int, lang: str = "ru") -> str:  # 👈 добавь параметр lang
     with Session(engine) as s:
         cur = get_draft_value(s, user_id, "skills", "skills_langs") or ""
     items = [p.strip() for p in cur.split("//") if p.strip()]
     if not items:
         return ""
-    return "\n\n──────────────\n🌟 Сейчас выбрано:\n" + "\n".join(f"• {it}" for it in items) + "\n──────────────"
+    return f"\n\n──────────────\n{t(MSG_LANGUAGE_CHOSEN, lang)}\n" + "\n".join(f"• {it}" for it in items) + "\n──────────────"  # 👈
+
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Пропуск вопроса
 # ──────────────────────────────────────────────────────────────────────────────
 
+# @router.callback_query(F.data.startswith("free:"))
+# async def handle_free(callback: CallbackQuery):
+#     await callback.answer()
+#     try:
+#         _, action, qkey = callback.data.split(":", 2)
+#     except ValueError:
+#         return
+    
+#     if action != "ask":
+#         return
+#     tg_id = callback.from_user.id
+
+#     def _mark_wait():
+#         with Session(engine) as s:
+#             user = s.query(User).filter_by(telegram_id=tg_id).first()
+#             if not user:
+#                 return None
+#             set_free_wait(s, user.id, qkey)
+#             s.commit()
+#             return user.id
+
+#     user_id = await asyncio.to_thread(_mark_wait)
+#     if not user_id:
+#         await callback.message.answer("Press /start.")
+#         return
+
+#     try:
+#         await callback.message.edit_reply_markup(reply_markup=None)
+#     except Exception:
+#         pass
+
+#     close_text_gate(user_id)
+#     await callback.message.answer(personal_msg_for(qkey))
 @router.callback_query(F.data.startswith("free:"))
 async def handle_free(callback: CallbackQuery):
     await callback.answer()
@@ -1671,14 +2035,16 @@ async def handle_free(callback: CallbackQuery):
         with Session(engine) as s:
             user = s.query(User).filter_by(telegram_id=tg_id).first()
             if not user:
-                return None
+                return None, "ru"
             set_free_wait(s, user.id, qkey)
             s.commit()
-            return user.id
+            lang = get_user_lang(s, user.id)  # 👈
+            return user.id, lang
 
-    user_id = await asyncio.to_thread(_mark_wait)
+    user_id, lang = await asyncio.to_thread(_mark_wait)  # 👈
+    
     if not user_id:
-        await callback.message.answer("Сначала /start.")
+        await callback.message.answer("Press /start.")
         return
 
     try:
@@ -1687,8 +2053,7 @@ async def handle_free(callback: CallbackQuery):
         pass
 
     close_text_gate(user_id)
-    await callback.message.answer(personal_msg_for(qkey))
-
+    await callback.message.answer(t(personal_msg_for(qkey), lang))  # 👈
 
 
 
@@ -1733,7 +2098,7 @@ async def handle_multiselect(callback: CallbackQuery):
         now = asyncio.get_event_loop().time()
         key_ = (chat_id, qkey)
         if _last_save_ts.get(key_, 0) + 0.6 > now:
-            await callback.answer("Уже сохраняю…", show_alert=False)
+            await callback.answer(t(MSG_SAVING_PROGRESS, lang), show_alert=False)
             return
         _last_save_ts[key_] = now
 
@@ -1742,36 +2107,39 @@ async def handle_multiselect(callback: CallbackQuery):
             with Session(engine) as s:
                 user = s.query(User).filter_by(telegram_id=tg_id).first()
                 if not user:
-                    return None, None, "no_user", None
+                    return None, None, "no_user", None, "ru"
+                
+                lang = get_user_lang(s, user.id)
 
                 # переключение чекбоксов
                 if action == "toggle":
                     toggle_selection(s, user.id, qkey, val)
                     s.commit()
                     selected = get_selected_set(s, user.id, qkey)
-                    return user.id, selected, None, None
+                    return user.id, selected, None, None, lang
 
                 # сброс
                 if action == "reset":
                     clear_selection(s, user.id, qkey)
                     s.commit()
-                    return user.id, set(), None, None
+                    return user.id, set(), None, None,  lang
 
                 # «Готово» (и совместимость со старым "save")
                 if action in {"done", "save"}:
-                    text = build_answer_text_from_selection(s, user.id, qkey)
+                    # text = build_answer_text_from_selection(s, user.id, qkey)
+                    text = build_answer_text_from_selection(s, user.id, qkey, lang)
                     if not text.strip():
-                        return user.id, None, "empty", None
+                        return user.id, None, "empty", None, lang
                     # сохраняем во временное место, чтобы потом склеить со "своим вариантом" при необходимости
                     _store_tmp_selection(s, user.id, qkey, text)
                     s.commit()
-                    return user.id, "__ask_add_own__", None, text
+                    return user.id, "__ask_add_own__", None, text, lang
 
                 # «Пропустить» → спрашиваем, хочет ли добавить своё (но без предварительного выбора)
                 if action == "skip":
                     _store_tmp_selection(s, user.id, qkey, "")  # пустой выбор
                     s.commit()
-                    return user.id, "__ask_add_own__", None, ""
+                    return user.id, "__ask_add_own__", None, "", lang
 
                 # ответ на «Добавить своё?»
                 if action in {"add_yes", "add_no"}:
@@ -1780,21 +2148,21 @@ async def handle_multiselect(callback: CallbackQuery):
                         # ждём свободный ввод по специальному ключу, чтобы потом склеить
                         set_free_wait(s, user.id, f"addown::{qkey}")
                         s.commit()
-                        return user.id, "__await_add_own__", None, None
+                        return user.id, "__await_add_own__", None, None, lang
                     else:
                         # достаём временный выбор и финализируем без "своего"
                         tmp = _load_tmp_selection(s, user.id, qkey)
                         next_key = _finalize_multiselect_text(s, user.id, qkey, tmp or "")
                         _clear_tmp_selection(s, user.id, qkey)
                         s.commit()
-                        return user.id, next_key, "saved", tmp
+                        return user.id, next_key, "saved", tmp, lang
 
-                return user.id, None, None, None
+                return user.id, None, None, None, lang
 
-        user_id, payload, status, echo_text = await asyncio.to_thread(_work)
+        user_id, payload, status, echo_text, lang = await asyncio.to_thread(_work)
 
         if not user_id:
-            await callback.message.answer("Сначала /start.")
+            await callback.message.answer("Press /start.")
             return
 
         # отрисовки
@@ -1810,10 +2178,11 @@ async def handle_multiselect(callback: CallbackQuery):
                         return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
                 role_for_exp = await asyncio.to_thread(_role)
             role_for_exp_norm = normalize_position(role_for_exp)
-            pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, role_for_exp_norm)
+            # pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, role_for_exp_norm)
+            pairs = await asyncio.to_thread(get_options, base_qkey, user_id, lang, role_for_exp_norm)
             pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
             pairs = pairs or []
-            markup = build_multiselect_kb(qkey, pairs, payload or set())
+            markup = build_multiselect_kb(qkey, pairs, payload or set(), lang)
             try:
                 await callback.message.edit_reply_markup(reply_markup=markup)
             except Exception as e:
@@ -1826,10 +2195,10 @@ async def handle_multiselect(callback: CallbackQuery):
                 await callback.message.edit_reply_markup(reply_markup=None)
             except Exception:
                 pass
-            preview = f"\n\nСейчас выбрано: {echo_text}" if (echo_text and echo_text.strip()) else ""
+            preview = f"\n{t(MSG_CURRENTLY_SELECTED, lang)} {echo_text}" if (echo_text and echo_text.strip()) else ""
             await callback.message.answer(
-                "Хочешь добавить что-то своё к выбранному?" + preview,
-                reply_markup=add_own_kb(qkey)
+                t(MSG_ADD_MORE, lang) + preview,
+                reply_markup=add_own_kb(qkey, lang)
                 )
             return
 
@@ -1839,15 +2208,16 @@ async def handle_multiselect(callback: CallbackQuery):
                 await callback.message.edit_reply_markup(reply_markup=None)
             except Exception:
                 pass
-            await callback.message.answer(personal_msg_for(qkey))
+            await callback.message.answer(t(personal_msg_for(qkey), lang))
             return
 
         # обработка пустого сохранения
         if status == "empty":
-            await callback.answer("Выбери хотя бы один вариант или нажми «Пропустить».", show_alert=True)
+            await callback.answer(t(MSG_CHOOSE_AT_LEAST_ONE, lang), show_alert=True)
             # перерисуем ту же клавиатуру
             base_qkey = qkey.split("::", 1)[1] if ("::" in qkey) else qkey
-            pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, None)
+            # pairs = await asyncio.to_thread(get_options, base_qkey, user_id, None, None)
+            pairs = await asyncio.to_thread(get_options, base_qkey, user_id, lang, None)
             pairs = [(v, l) for (v, l) in (pairs or []) if _fits_keyboard_label(l)]
             def _sel():
                 with Session(engine) as s:
@@ -1855,7 +2225,7 @@ async def handle_multiselect(callback: CallbackQuery):
             selected_now = await asyncio.to_thread(_sel)
             try:
                 await callback.message.edit_reply_markup(
-                    reply_markup=build_multiselect_kb(qkey, pairs, selected_now or set())
+                    reply_markup=build_multiselect_kb(qkey, pairs, selected_now or set(), lang)
                 )
             except Exception:
                 pass
@@ -1868,7 +2238,13 @@ async def handle_multiselect(callback: CallbackQuery):
             except Exception:
                 pass
             if echo_text is not None:
-                await callback.message.answer(f"🌟 Готово! Сохранил вариант(ы): {echo_text or '—'}")
+                def _get_lang():
+                    with Session(engine) as s:
+                        return get_user_lang(s, user_id) if user_id else "ru"
+                lang = await asyncio.to_thread(_get_lang)
+
+                translated_text = t(echo_text, lang) if echo_text else '—'
+                await callback.message.answer(f"{t(MSG_SAVED_VARIANTS, lang)} {translated_text}")
 
             # роутинг дальше — ровно как у тебя было
             if payload == "__continue_summary__":
@@ -1888,6 +2264,6 @@ async def handle_multiselect(callback: CallbackQuery):
             if payload:
                 await send_next_with_intro(chat_id, payload, user_id)
             else:
-                await callback.message.answer("🎉 Спасибо! Всё заполнено.\nРезюме генерируется ...(1-2 мин.)")
+                await callback.message.answer(t(MSG_THANKS_RESUME, lang))
                 await create_order_and_run_ai(chat_id, user_id)
             return

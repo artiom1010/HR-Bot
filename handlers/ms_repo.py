@@ -36,7 +36,22 @@ def clear_selection(s: Session, user_id: int, qkey: str) -> None:
     )
 
 
-def build_answer_text_from_selection(s, user_id: int, qkey: str) -> str:
+# def build_answer_text_from_selection(s, user_id: int, qkey: str) -> str:
+#     values = list(get_selected_set(s, user_id, qkey) or [])
+
+#     base_key = qkey.split("::", 1)[1] if ("::" in qkey) else qkey
+
+#     labels = []
+#     for v in values:
+#         lab = get_label_for(s, base_key, v, user_id)
+#         if not lab:
+#             lab = dict(CHOICES.get(base_key, [])).get(v, v)
+#         labels.append(lab)
+
+#     return ", ".join(labels)
+
+from i18n import t
+def build_answer_text_from_selection(s, user_id: int, qkey: str, lang: str = "ru") -> str:
     values = list(get_selected_set(s, user_id, qkey) or [])
 
     base_key = qkey.split("::", 1)[1] if ("::" in qkey) else qkey
@@ -46,6 +61,8 @@ def build_answer_text_from_selection(s, user_id: int, qkey: str) -> str:
         lab = get_label_for(s, base_key, v, user_id)
         if not lab:
             lab = dict(CHOICES.get(base_key, [])).get(v, v)
-        labels.append(lab)
+        
+        # ✅ ПЕРЕВОДИМ LABEL!
+        labels.append(t(lab, lang))
 
     return ", ".join(labels)
