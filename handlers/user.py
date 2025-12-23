@@ -1866,7 +1866,7 @@ def _norm_lang_label(s: str) -> str:
     # Можно заменить на .title(), если хочешь "Польский" -> "Польский".
     return s[:1].upper() + s[1:] if s else s
 
-def _upsert_lang_pair(s: Session, user_id: int, lang_label: str, lvl_label: str) -> str:
+def _upsert_lang_pair(s: Session, user_id: int, lang_label: str, lvl_label: str, user_lang: str = "ru") -> str:
     # читаем текущий текст черновика
     cur = get_draft_value(s, user_id, "skills", "skills_langs") or ""
     items = {}
@@ -1874,7 +1874,11 @@ def _upsert_lang_pair(s: Session, user_id: int, lang_label: str, lvl_label: str)
         if " – " in ch:
             lng, lvl = ch.split(" – ", 1)
             items[lng.strip()] = lvl.strip()
-    items[lang_label] = lvl_label  # upsert
+
+    translated_lang = t(lang_label, user_lang)
+    translated_lvl = t(lvl_label, user_lang)
+
+    items[translated_lang] = translated_lvl  # upsert
     new_text = " // ".join([f"{k} – {v}" for k, v in items.items()])
     replace_draft(s, user_id, "skills", "skills_langs", new_text)
     # очищаем временное имя кастомного языка, если было
@@ -1944,7 +1948,7 @@ async def handle_lang(callback: CallbackQuery):
 
         def _save_pair():
             with Session(engine) as s:
-                return _upsert_lang_pair(s, user_id, lang_label, lvl_label)
+                return _upsert_lang_pair(s, user_id, lang_label, lvl_label, lang)
 
         await asyncio.to_thread(_save_pair)
         await callback.answer(f"{t(MSG_LANGUAGE_ADDED, lang)} {pair}", show_alert=False)
@@ -1962,7 +1966,7 @@ async def handle_lang(callback: CallbackQuery):
             with Session(engine) as s:
                 name = get_draft_value(s, user_id, "skills", "skills_langs__tmp_name") or ""
                 lang_label = _norm_lang_label(name)
-                _upsert_lang_pair(s, user_id, lang_label, lvl_label)
+                _upsert_lang_pair(s, user_id, lang_label, lvl_label, lang)
                 return lang_label
 
         lang_label = await asyncio.to_thread(_finish_custom)
