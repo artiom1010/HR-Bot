@@ -811,21 +811,73 @@ async def generate_skills_tools_options(user_id: int) -> list[str] | None:
 # =========================
 # СБОРКА ГЕНЕРАЦИИ И АЛЕРТА
 # =========================
+# @alert_on_exception(ttl=1)
+# async def chain_generate_after_position(user_id: int):
+#     try:
+#         task_labels  = await generate_tasks_options(user_id)
+#         await asyncio.sleep(2.0)
+#         value_labels = await generate_values_options(user_id)
+#         await asyncio.sleep(2.0)
+#         # hard_labels = await generate_skills_hard_options(user_id)
+#         # await asyncio.sleep(2.0)
+#         tools_labels = await generate_skills_tools_options(user_id)
+
+#         username, full_name, _ = get_user_identity(user_id)
+#         ctx = get_user_context(user_id)
+#         lang_code = _map_lang_code(ctx.get("lang"))
+#         pos_norm  = normalize_position(ctx.get("position") or "") or (ctx.get("position") or "")
+
+#         parts = [
+#             f"Username: @{username or '-'}",
+#             f"Full name: {full_name or '-'}",
+#             "",
+#             f"Position: {pos_norm} - {lang_code}",
+#         ]
+#         if task_labels:
+#             parts += ["", "Tasks:", "- " + "\n- ".join(task_labels)]
+#         if value_labels:
+#             parts += ["", "Values:", "- " + "\n- ".join(value_labels)]
+#         # if hard_labels:
+#             # parts += ["", "Hard skills:", "- " + "\n- ".join(hard_labels)]
+#         else:
+#             parts += ["", "Hard skills: (generation failed - retry needed)"]
+#         if tools_labels:
+#             parts += ["", "Tools:", "- " + "\n- ".join(tools_labels)]
+
+#         txt = "\n".join(parts)
+#         ok = await alert.send(txt, level="INFO")
+#         if not ok:
+#             log.warning("alert: combined send failed (user_id=%s)", user_id)
+
+#     except Exception as e:
+#         log.exception("chain_generate_after_position: %s", e)
 @alert_on_exception(ttl=1)
 async def chain_generate_after_position(user_id: int):
     try:
-        task_labels  = await generate_tasks_options(user_id)
+        task_labels = await generate_tasks_options(user_id)
+        if not task_labels:
+            log.warning("user_id=%s: Tasks попытка 1 провалилась, retry...", user_id)
+            await asyncio.sleep(2.0)
+            task_labels = await generate_tasks_options(user_id)
         await asyncio.sleep(2.0)
+        
         value_labels = await generate_values_options(user_id)
+        if not value_labels:
+            log.warning("user_id=%s: Values попытка 1 провалилась, retry...", user_id)
+            await asyncio.sleep(2.0)
+            value_labels = await generate_values_options(user_id)
         await asyncio.sleep(2.0)
-        # hard_labels = await generate_skills_hard_options(user_id)
-        # await asyncio.sleep(2.0)
+        
         tools_labels = await generate_skills_tools_options(user_id)
+        if not tools_labels:
+            log.warning("user_id=%s: Tools попытка 1 провалилась, retry...", user_id)
+            await asyncio.sleep(2.0)
+            tools_labels = await generate_skills_tools_options(user_id)
 
         username, full_name, _ = get_user_identity(user_id)
         ctx = get_user_context(user_id)
         lang_code = _map_lang_code(ctx.get("lang"))
-        pos_norm  = normalize_position(ctx.get("position") or "") or (ctx.get("position") or "")
+        pos_norm = normalize_position(ctx.get("position") or "") or (ctx.get("position") or "")
 
         parts = [
             f"Username: @{username or '-'}",
@@ -833,16 +885,21 @@ async def chain_generate_after_position(user_id: int):
             "",
             f"Position: {pos_norm} - {lang_code}",
         ]
+        
         if task_labels:
             parts += ["", "Tasks:", "- " + "\n- ".join(task_labels)]
+        else:
+            parts += ["", "Tasks: ❌ generation failed after 2 attempts"]
+            
         if value_labels:
             parts += ["", "Values:", "- " + "\n- ".join(value_labels)]
-        # if hard_labels:
-            # parts += ["", "Hard skills:", "- " + "\n- ".join(hard_labels)]
         else:
-            parts += ["", "Hard skills: (generation failed - retry needed)"]
+            parts += ["", "Values: ❌ generation failed after 2 attempts"]
+            
         if tools_labels:
             parts += ["", "Tools:", "- " + "\n- ".join(tools_labels)]
+        else:
+            parts += ["", "Tools: ❌ generation failed after 2 attempts"]
 
         txt = "\n".join(parts)
         ok = await alert.send(txt, level="INFO")
