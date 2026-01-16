@@ -148,7 +148,7 @@
   "Уже сохраняю…": "Deja salvez…",
   "Сейчас выбрано:": "Selectat acum:",
   "Хочешь добавить что-то своё к выбранному?": "Vrei să adaugi ceva propriu?",
-  "Выбери хотя бы один вариант или нажми «Пропустить».": "Selectează cel puțin o opțiune sau apasă \"Sări\".",
+  "Выбери хотя бы один вариант или нажми «Пропустить».": "Selectează cel puțin o opțiune sau apasă \"Omite\".",
   "🚀 Да, поехали!": "🚀 Da, Continuă!",
   "🚀 Продолжить": "🚀 Continuă",
   "🚀 Готов!": "🚀 Gata!",
@@ -198,6 +198,8 @@
   "Ваше резюме (PDF)": "CV-ul tău (PDF)",
   "Ваше резюме (Word)": "CV-ul tău (Word)",
   "Файл не найден на диске.": "Fișierul nu a fost găsit pe disc.",
-  "Файлы не найдены на диске.": "Fișierele nu au fost găsite pe disc."
+  "Файлы не найдены на диске.": "Fișierele nu au fost găsite pe disc.",
+
+  "💰 Оплата получена!\nНажми кнопку ниже, чтобы скачать резюме.": "💰 Plata primită!\nApasă butonul de mai jos pentru a descărca CV-ul."
 
 }
