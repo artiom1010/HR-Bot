@@ -66,13 +66,13 @@ def register_payment(order_id: int):
         "ExternalDate": external_dt.isoformat(timespec="seconds"),
         "ExpiryDate": expiry_dt.isoformat(timespec="seconds"),
         "Services": [{
-            "Name": "Cart of products",
-            "Description": "Cart of products",
+            "Name": "HR-Bot Resume",
+            "Description": "Professional CV",
             "Amount": order.amount_bani,
             "Products": [{
                 "LineNo": 1,
                 "Code": "RESUME",
-                "Name": "Resume",
+                "Name": "Professional Resume",
                 "Amount": order.amount_bani, 
                 "TotalAmount": order.amount_bani
             }]
