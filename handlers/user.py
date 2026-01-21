@@ -80,7 +80,6 @@ router = Router()
 
 # --- constants --- 
 SUMMARY_SINGLE_WITH_PERSONAL = {"summary_industry"}
-# MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks", "skills_hard", "skills_tools"}
 MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks", "skills_tools"}
 PAUSE_BEFORE = {"summary", "skills"}
 
@@ -539,36 +538,6 @@ async def start_handler(message: Message):
     await message.answer(START_MESSAGE,reply_markup=start_keyboard())
 
 
-# @router.callback_query(F.data == "starts")
-# async def handle_start(callback: CallbackQuery):
-#     await callback.answer()
-#     try:
-#         await callback.message.edit_reply_markup(reply_markup=None)
-#     except Exception as e:
-#         logger.debug("edit_reply_markup skip: %s", e)
-
-#     tg_id = callback.from_user.id
-#     def _work():
-#         with Session(engine) as s:
-#             user = s.query(User).filter(User.telegram_id == tg_id).first()
-#             if not user:
-#                 user = get_or_create_user(s, tg_id, callback.from_user.username or "", callback.from_user.full_name or "")
-#             next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
-#             return user.id, next_key
-
-#     def _get_lang():
-#         with Session(engine) as s:
-#             user = s.query(User).filter_by(telegram_id=tg_id).first()
-#             return get_user_lang(s, user.id) if user else "ru"
-#     lang = await asyncio.to_thread(_get_lang)
-
-#     user_id, next_key = await asyncio.to_thread(_work)
-
-#     if next_key:
-#         await send_next_with_intro(callback.message.chat.id, next_key, user_id)
-#     else:
-#         await callback.message.answer(t(MSG_THANKS_RESUME, lang))
-#         await create_order_and_run_ai(callback.message, user_id)
 @router.callback_query(F.data == "starts")
 async def handle_start(callback: CallbackQuery):
     await callback.answer()
@@ -1006,33 +975,6 @@ async def handle_answer(message: Message, user_id: int | None = None):
 # ──────────────────────────────────────────────────────────────────────────────
 # /new_interview — полная очистка
 # ──────────────────────────────────────────────────────────────────────────────
-# @router.message(Command("new_interview"))
-# async def new_interview_handler(message: Message):
-#     tg_id = message.from_user.id
-
-#     def _get_lang():
-#         with Session(engine) as s:
-#             user = s.query(User).filter_by(telegram_id=tg_id).first()
-#             return get_user_lang(s, user.id) if user else "ru"
-#     lang = await asyncio.to_thread(_get_lang)
-
-#     def _reset():
-#         with Session(engine) as s:
-#             user = s.query(User).filter(User.telegram_id == tg_id).first()
-#             if not user:
-#                 return None, 0
-#             deleted = clear_user_answers(s, user.id)
-#             clear_user_drafts(s, user.id)
-#             clear_user_answer_options(s, user.id)
-#             return user.id, deleted
-
-#     user_db_id, _ = await asyncio.to_thread(_reset)
-
-#     if not user_db_id:
-#         await message.answer(t(MSG_ONLY_START, lang))
-#         return
-
-#     await message.answer(t(START_MESSAGE, lang), reply_markup=start_keyboard())
 @router.message(Command("new_interview"))
 async def new_interview_handler(message: Message):
     tg_id = message.from_user.id
@@ -1060,80 +1002,6 @@ async def new_interview_handler(message: Message):
 # # ──────────────────────────────────────────────────────────────────────────────
 # # Кнопки «flow:...»
 # # ──────────────────────────────────────────────────────────────────────────────
-# @router.callback_query(F.data.startswith("flow:"))
-# async def handle_flow(callback: CallbackQuery):
-#     await callback.answer()
-#     try:
-#         _, action, key = callback.data.split(":", 2)
-#     except ValueError:
-#         return
-
-#     tg_id = callback.from_user.id
-#     chat_id = callback.message.chat.id
-
-#     def _get_lang():
-#         with Session(engine) as s:
-#             user = s.query(User).filter_by(telegram_id=tg_id).first()
-#             return get_user_lang(s, user.id) if user else "ru"
-#     lang = await asyncio.to_thread(_get_lang)
-
-#     if action == "ask":
-#         try:
-#             await callback.message.edit_reply_markup(reply_markup=None)
-#         except Exception:
-#             pass
-#         def _mark_wait():
-#             with Session(engine) as s:
-#                 user = s.query(User).filter_by(telegram_id=tg_id).first()
-#                 if not user:
-#                     return None, None
-#                 wait_key = "courses::course_item" if key == "courses" else key
-#                 set_free_wait(s, user.id, wait_key)
-#                 s.commit()
-#                 return user.id, wait_key
-#         user_id, wait_key = await asyncio.to_thread(_mark_wait)
-#         if not user_id:
-#             await callback.message.answer("Press /start.")
-#             return
-#         close_text_gate(user_id) 
-#         msg = COURSES_ASK_TEXT if key == "courses" else personal_msg_for(wait_key)
-#         await callback.message.answer(t(msg, lang))
-#         return
-
-#     if action == "skip":
-#         def _work():
-#             with Session(engine) as s:
-#                 user = s.query(User).filter_by(telegram_id=tg_id).first()
-#                 if not user: 
-#                     return None, None
-#                 if key == "courses":
-#                     # собрать все курсы в одну строку и очистить черновики
-#                     from handlers.db_helpers import get_drafts_values_ordered
-#                     parts = get_drafts_values_ordered(s, user.id, "courses")
-#                     combined = " // ".join(parts) if parts else ""
-#                     save_answer(s, user.id, "courses", combined)
-#                     clear_parent_drafts(s, user.id, "courses")
-#                 else:
-#                     save_answer(s, user.id, key, "")
-#                 next_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
-#                 return user.id, next_key
-            
-#         user_id, next_key = await asyncio.to_thread(_work)
-
-#         if not user_id:
-#             await callback.message.answer("Press /start.")
-#             return
-#         try:
-#             await callback.message.edit_reply_markup(reply_markup=None)
-#         except Exception:
-#             pass
-        
-#         close_text_gate(user_id)
-#         if next_key:
-#             await send_next_with_intro(chat_id, next_key, user_id)
-#         else:
-#             await callback.message.answer(t(MSG_THANKS_RESUME, lang))
-#             await create_order_and_run_ai(callback.message, user_id)
 @router.callback_query(F.data.startswith("flow:"))
 async def handle_flow(callback: CallbackQuery):
     await callback.answer()
@@ -1468,68 +1336,6 @@ async def finalize_experience_and_choice(chat_id: int, user_id: int, exp_index: 
     await bot.send_message(chat_id, done, reply_markup=exp_finish_kb(exp_index + 1, lang))
 
 
-
-# @router.callback_query(F.data.startswith("exp:"))
-# async def handle_exp_nav(callback: CallbackQuery):
-#     await callback.answer()
-#     parts = callback.data.split(":")
-#     action = parts[1]
-
-#     try:
-#         await callback.message.edit_reply_markup(reply_markup=None)
-#     except Exception:
-#         pass
-
-#     tg_id = callback.from_user.id
-#     def _get_user():
-#         with Session(engine) as s:
-#             u = s.query(User).filter_by(telegram_id=tg_id).first()
-#             return (u.id if u else None)
-#     user_id = await asyncio.to_thread(_get_user)
-
-#     def _get_lang():
-#         with Session(engine) as s:
-#             user = s.query(User).filter_by(telegram_id=tg_id).first()
-#             return get_user_lang(s, user.id) if user else "ru"
-#     lang = await asyncio.to_thread(_get_lang)
-
-#     if not user_id:
-#         await callback.message.answer("Press /start")
-#         return
-
-#     if action == "add":
-#         exp_index = int(parts[2])
-#         def _clr():
-#             with Session(engine) as s:
-#                 clear_parent_drafts(s, user_id, f"exp{exp_index}")
-#                 s.commit()
-#         await asyncio.to_thread(_clr)
-
-#         await ask_next_experience_step(callback.message.chat.id, user_id, exp_index=exp_index)
-#         return
-
-#     if action == "next":
-#         # def _next():
-#         #     with Session(engine) as s:
-#         #         return get_first_unanswered(s, user_id, QUESTION_FLOW)
-#         # next_key = await asyncio.to_thread(_next)
-
-#             # Помечаем experience как завершённый
-#         def _mark_done():
-#             with Session(engine) as s:
-#                 save_answer(s, user_id, "experience", "completed")
-#         await asyncio.to_thread(_mark_done)
-        
-#         def _next():
-#             with Session(engine) as s:
-#                 return get_first_unanswered(s, user_id, QUESTION_FLOW)
-#         next_key = await asyncio.to_thread(_next)
-
-#         if next_key:
-#             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
-#         else:
-#             await callback.message.answer(t(MSG_THANKS_RESUME, lang))
-#             await create_order_and_run_ai(callback.message, user_id)
 @router.callback_query(F.data.startswith("exp:"))
 async def handle_exp_nav(callback: CallbackQuery):
     await callback.answer()
@@ -1638,64 +1444,6 @@ async def finalize_education_and_choice(chat_id: int, user_id: int, edu_index: i
     await bot.send_message(chat_id, done, reply_markup=edu_finish_kb(edu_index + 1, lang))
 
 
-# @router.callback_query(F.data.startswith("edu:"))
-# async def handle_edu_nav(callback: CallbackQuery):
-#     await callback.answer()
-#     parts = callback.data.split(":")
-#     action = parts[1]
-
-#     try:
-#         await callback.message.edit_reply_markup(reply_markup=None)
-#     except Exception:
-#         pass
-#     tg_id = callback.from_user.id
-#     def _get_user():
-#         with Session(engine) as s:
-#             u = s.query(User).filter_by(telegram_id=tg_id).first()
-#             return (u.id if u else None)
-#     user_id = await asyncio.to_thread(_get_user)
-
-#     def _get_lang():
-#         with Session(engine) as s:
-#             user = s.query(User).filter_by(telegram_id=tg_id).first()
-#             return get_user_lang(s, user.id) if user else "ru"
-#     lang = await asyncio.to_thread(_get_lang)
-
-
-#     if not user_id:
-#         await callback.message.answer("Press /start")
-#         return
-
-#     if action == "start":
-#         edu_index = int(parts[2]) if len(parts) > 2 else 1
-#         def _clr():
-#             with Session(engine) as s:
-#                 clear_parent_drafts(s, user_id, f"edu{edu_index}")
-#                 s.commit()
-#         await asyncio.to_thread(_clr)
-#         await ask_next_education_step(callback.message.chat.id, user_id, edu_index=edu_index)
-#         return
-
-#     if action == "add":
-#         edu_index = int(parts[2])
-#         def _clr():
-#             with Session(engine) as s:
-#                 clear_parent_drafts(s, user_id, f"edu{edu_index}")
-#                 s.commit()
-#         await asyncio.to_thread(_clr)
-#         await ask_next_education_step(callback.message.chat.id, user_id, edu_index=edu_index)
-#         return
-
-#     if action == "next":
-#         def _next():
-#             with Session(engine) as s:
-#                 return get_first_unanswered(s, user_id, QUESTION_FLOW)
-#         next_key = await asyncio.to_thread(_next)
-#         if next_key:
-#             await send_next_with_intro(callback.message.chat.id, next_key, user_id)
-#         else:
-#             await callback.message.answer(t(MSG_THANKS_RESUME, lang))
-#             await create_order_and_run_ai(callback.message, user_id)
 @router.callback_query(F.data.startswith("edu:"))
 async def handle_edu_nav(callback: CallbackQuery):
     await callback.answer()
@@ -1783,7 +1531,6 @@ async def ask_next_courses_step(chat_id: int, user_id: int):
 # Мастер skills
 # ──────────────────────────────────────────────────────────────────────────────
 SKILLS_STEPS = [
-    # ("skills_hard",  SKILLS_MSG_HARD),
     ("skills_tools", SKILLS_MSG_TOOLS),
     ("skills_langs", LANGS_MSG),
 ]
@@ -1838,7 +1585,6 @@ def _make_langs_text(raw: str) -> str:
 async def finalize_skills_and_go_next(chat_id: int, user_id: int):
     def _finish():
         with Session(engine) as s:
-            # hard  = (get_draft_value(s, user_id, "skills", "skills_hard")  or "").strip()
             tools = (get_draft_value(s, user_id, "skills", "skills_tools") or "").strip()
             langs = (get_draft_value(s, user_id, "skills", "skills_langs") or "").strip()
 
@@ -1846,10 +1592,8 @@ async def finalize_skills_and_go_next(chat_id: int, user_id: int):
             skills_text = " // ".join([p for p in [tools] if p])
             langs_text  = _make_langs_text(langs) if langs else ""
 
-            if skills_text:
-                save_answer(s, user_id, "skills", skills_text)
-            if langs_text or "languages" in dict(QUESTION_FLOW):
-                save_answer(s, user_id, "languages", langs_text)
+            save_answer(s, user_id, "skills", skills_text)
+            save_answer(s, user_id, "languages", langs_text)
 
             clear_parent_drafts(s, user_id, "skills")
             next_key = get_first_unanswered(s, user_id, QUESTION_FLOW)
@@ -2007,40 +1751,6 @@ def _current_langs_text(user_id: int, lang: str = "ru") -> str:  # 👈 доба
 # ──────────────────────────────────────────────────────────────────────────────
 # Пропуск вопроса
 # ──────────────────────────────────────────────────────────────────────────────
-
-# @router.callback_query(F.data.startswith("free:"))
-# async def handle_free(callback: CallbackQuery):
-#     await callback.answer()
-#     try:
-#         _, action, qkey = callback.data.split(":", 2)
-#     except ValueError:
-#         return
-    
-#     if action != "ask":
-#         return
-#     tg_id = callback.from_user.id
-
-#     def _mark_wait():
-#         with Session(engine) as s:
-#             user = s.query(User).filter_by(telegram_id=tg_id).first()
-#             if not user:
-#                 return None
-#             set_free_wait(s, user.id, qkey)
-#             s.commit()
-#             return user.id
-
-#     user_id = await asyncio.to_thread(_mark_wait)
-#     if not user_id:
-#         await callback.message.answer("Press /start.")
-#         return
-
-#     try:
-#         await callback.message.edit_reply_markup(reply_markup=None)
-#     except Exception:
-#         pass
-
-#     close_text_gate(user_id)
-#     await callback.message.answer(personal_msg_for(qkey))
 @router.callback_query(F.data.startswith("free:"))
 async def handle_free(callback: CallbackQuery):
     await callback.answer()

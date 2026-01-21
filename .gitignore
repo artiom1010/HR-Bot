@@ -4,3 +4,4 @@ fff/
 resume_bot.db
 __pycache__/
 do_ai_test.py
+test_paynet_response.py
