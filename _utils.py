@@ -9,7 +9,8 @@ async def set_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="/start", description="🚀 Старт"),
         BotCommand(command="/new_interview", description="✅ Новое интервью"),
-        BotCommand(command="/support", description="💬 Поддержка")
+        BotCommand(command="/support", description="💬 Поддержка"),
+        BotCommand(command="/policy", description="📄 Политики")
     ]
     await bot.set_my_commands(commands)
 

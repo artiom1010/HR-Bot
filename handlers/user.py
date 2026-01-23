@@ -190,6 +190,28 @@ async def cmd_support(message: Message):
         parse_mode="HTML"
     )
     
+@router.message(Command("policy"))
+async def cmd_policy(message: Message):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🔒 Privacy Policy",
+            url="https://telegra.ph/Privacy-policy-01-20-98"
+        )],
+        [InlineKeyboardButton(
+            text="📋 Terms & Conditions",
+            url="https://telegra.ph/Privacy-policy-01-20-98"
+        )],
+        [InlineKeyboardButton(
+            text="🍪 Cookies Policy",
+            url="https://telegra.ph/Privacy-policy-01-20-98"
+        )]
+    ])
+    
+    await message.answer(
+        "📄 Ознакомьтесь с нашими политиками:",
+        reply_markup=keyboard
+    )
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Навигация по вопросам
 # ──────────────────────────────────────────────────────────────────────────────
