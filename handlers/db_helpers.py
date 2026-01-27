@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from _database import (
     User, Answer, Order, PaynetStatus,
-    ProcessedData, Draft, AnswerOption
+    ProcessedData, Draft, AnswerOption, StepLog
     )
 
 
@@ -33,6 +33,7 @@ def get_first_unanswered(session: Session, user_id: int, question_flow: list[tup
 def save_answer(session: Session, user_id: int, question_key: str, answer_text: str) -> None:
     answer = Answer(user_id=user_id, question_key=question_key, answer=answer_text)
     session.add(answer)
+    log_step(session, user_id, question_key, answer_text)
     session.commit()
 
 
@@ -47,11 +48,12 @@ def create_order(session: Session, user_id: int, invoice: str, amount_bani: int)
     session.commit()
     return order
 
-
+from datetime import datetime
 def mark_order_paid(session: Session, order_id: int) -> None:
     order = session.get(Order, order_id)
     if order:
         order.paynet_status = PaynetStatus.paid
+        order.paid_at = datetime.utcnow()
         session.commit()
 
 
@@ -101,6 +103,7 @@ def drafts_count(s, user_id: int, parent_key: str) -> int:
 
 def add_draft(s, user_id: int, parent_key: str, step_key: str, value: str):
     s.add(Draft(user_id=user_id, parent_key=parent_key, step_key=step_key, value=value))
+    log_step(s, user_id, step_key, value)
 
 
 def get_drafts_values_ordered(s, user_id: int, parent_key: str) -> list[str]:
@@ -139,6 +142,7 @@ def replace_draft(s, user_id: int, parent_key: str, step_key: str, value: str):
         Draft.step_key == step_key
     ).delete(synchronize_session=False)
     s.add(Draft(user_id=user_id, parent_key=parent_key, step_key=step_key, value=value))
+    log_step(s, user_id, step_key, value)
     s.commit()
 
 
@@ -235,3 +239,49 @@ def get_user_lang(s: Session, user_id: int) -> str:
     if not answer:
         return "ru"
     return LANG_MAP.get(answer.answer, "ru")
+
+
+
+def log_step(s: Session, user_id: int, step_key: str, value: str = None):
+    """Записывает что пользователь прошёл шаг (один раз на пользователя)"""
+    
+    # Пропускаем если значение пустое
+    if value is not None and not value.strip():
+        return
+    
+    # Пропускаем служебные ключи
+    if step_key.startswith("ms::"):
+        return
+    if step_key.startswith("addown::"):
+        return
+    if step_key.endswith("__tmp_name"):
+        return
+    if step_key.endswith("__await"):
+        return
+    
+    # Пропускаем маркеры завершения этапов
+    SKIP_KEYS = {
+        "summary", 
+        "experience", 
+        "education", 
+        "courses", 
+        "skills", 
+        "languages",
+    }
+    
+    if step_key in SKIP_KEYS:
+        return
+    
+    # Пропускаем experience_1, experience_2, education_1, education_2 и т.д.
+    if step_key.startswith("experience_") and step_key[-1].isdigit():
+        return
+    if step_key.startswith("education_") and step_key[-1].isdigit():
+        return
+    
+    # Убираем префиксы типа "exp1::", "edu1::"
+    if "::" in step_key:
+        step_key = step_key.split("::")[-1]
+    
+    existing = s.query(StepLog).filter_by(user_id=user_id, step_key=step_key).first()
+    if not existing:
+        s.add(StepLog(user_id=user_id, step_key=step_key))

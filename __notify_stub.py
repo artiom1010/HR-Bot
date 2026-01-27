@@ -83,3 +83,7 @@ async def get_form(
 </script>
 '''
     return HTMLResponse(html)
+
+
+from stats_api import router as stats_router
+app.include_router(stats_router)

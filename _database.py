@@ -162,6 +162,20 @@ class MultiSelect(Base):
     )
 
 
+class StepLog(Base):
+    """Лог прохождения шагов — для статистики воронки"""
+    __tablename__ = "step_logs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    step_key = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "step_key", name="uq_step_log_user_step"),
+    )
+
+
 
 # ── 3. Создать таблицы ──────────────────────────────────────────────
 Base.metadata.create_all(engine)
