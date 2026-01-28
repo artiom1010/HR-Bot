@@ -185,7 +185,7 @@ async def cmd_support(message: Message):
     await message.answer(
         "💬 <b>Поддержка HR-Bot</b>\n\n"
         "Если у вас есть вопросы или предложения:\n"
-        '📧 <a href="sary.artema@mail.ru?subject=HR-Bot: Обратная связь">sary.artema@mail.ru</a>\n\n'
+        '📧 <a href="turbocvbot@gmail.com?subject=HR-Bot: Обратная связь">turbocvbot@gmail.com</a>\n\n'
         "Мы ответим в течение 24 часов.",
         parse_mode="HTML"
     )
