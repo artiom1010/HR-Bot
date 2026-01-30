@@ -86,4 +86,12 @@ async def get_form(
 
 
 from stats_api import router as stats_router
+from sqlalchemy import text
 app.include_router(stats_router)
+
+@app.head("/stats")
+async def stats_head():
+    """HEAD запрос для мониторинга — проверяет что база отвечает"""
+    with Session(engine) as s:
+        s.execute(text("SELECT 1"))  # проверка базы
+    return {}
