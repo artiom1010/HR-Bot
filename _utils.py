@@ -21,6 +21,9 @@ CHOICES = {
         ("main_en", "🇬🇧 English"),
         ("main_ro", "🇷🇴 Română")
     ],
+    "privacy_agreement": [
+        ("agree", "✅ Я Согласен"),
+    ],
     "resume_language": [
         ("ru", "RU — на Русском"), 
         ("en", "EN — in English"), 
@@ -305,7 +308,10 @@ USE_KEYBOARD_MSG = """
 # =========================
 
 QUESTION_FLOW = [
-    ("main_language", "🌐 На каком языке тебе будет удобнее общаться со мной? \n"),
+    ("main_language", "👋 Salut! \n\n🌐 Pe ce limbă îți este mai convenabil să comunici cu mine?"),
+
+    ("privacy_agreement", "📋 Продолжая использовать этот бот вы соглашаетесь с Политикой конфиденциальности и даете согласие на обработку ваших персональных данных\n\n👉 Подробнее: /policy\n\n✅ Нажимая «Я Согласен», вы подтверждаете, что ознакомились и принимаете условия."),
+
     
     ("resume_language", "📄 На каком языке ты хотел бы получить итоговое резюме?"),
     
