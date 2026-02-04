@@ -62,7 +62,8 @@ from _utils import (
     MSG_MANY_WORKS, MSG_ONE_EDUCATION, MSG_MANY_EDUCATIONS,
     MSG_MANY_COURSES, MSG_LANGUAGE_EXAMPLE, MSG_LANGUAGE_ADDED,
     MSG_LANGUAGE_SAVED, MSG_LANGUAGE_CHOSEN, MSG_SAVING_PROGRESS,
-    MSG_CURRENTLY_SELECTED, MSG_ADD_MORE, MSG_CHOOSE_AT_LEAST_ONE
+    MSG_CURRENTLY_SELECTED, MSG_ADD_MORE, MSG_CHOOSE_AT_LEAST_ONE,
+    MSG_SUPPORT, MSG_POLICY
 )
 
 from handlers.ms_repo import (
@@ -182,16 +183,28 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 @router.message(Command("support"))
 async def cmd_support(message: Message):
-    await message.answer(
-        "💬 <b>Поддержка HR-Bot</b>\n\n"
-        "Если у вас есть вопросы или предложения:\n"
-        '📧 <a href="turbocvbot@gmail.com?subject=HR-Bot: Обратная связь">turbocvbot@gmail.com</a>\n\n'
-        "Мы ответим в течение 24 часов.",
-        parse_mode="HTML"
-    )
-    
+    tg_id = message.from_user.id
+
+    def _get_lang():
+        with Session(engine) as s:
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
+            return get_user_lang(s, user.id) if user else "ro"
+    lang = await asyncio.to_thread(_get_lang)
+
+    await message.answer(t(MSG_SUPPORT, lang), parse_mode="HTML")
+
+
+
 @router.message(Command("policy"))
 async def cmd_policy(message: Message):
+    tg_id = message.from_user.id
+    
+    def _get_lang():
+        with Session(engine) as s:
+            user = s.query(User).filter_by(telegram_id=tg_id).first()
+            return get_user_lang(s, user.id) if user else "ro"
+    lang = await asyncio.to_thread(_get_lang)
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🔒 Privacy Policy",
@@ -207,11 +220,8 @@ async def cmd_policy(message: Message):
         )]
     ])
     
-    await message.answer(
-        "📄 Ознакомьтесь с нашими политиками:",
-        reply_markup=keyboard
-    )
-
+    await message.answer(t(MSG_POLICY, lang), reply_markup=keyboard)
+    
 # ──────────────────────────────────────────────────────────────────────────────
 # Навигация по вопросам
 # ──────────────────────────────────────────────────────────────────────────────
