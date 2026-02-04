@@ -404,3 +404,11 @@ MSG_CURRENTLY_SELECTED  = "Сейчас выбрано:"
 MSG_ADD_MORE            = "Хочешь добавить что-то своё к выбранному?"
 MSG_CHOOSE_AT_LEAST_ONE = "Выбери хотя бы один вариант или нажми «Пропустить»."
 
+MSG_SUPPORT = """💬 <b>Поддержка TurboCV Bot</b>
+
+Если у вас есть вопросы или предложения:
+📧 <a href="mailto:turbocvbot@gmail.com?subject=TurboCV-Bot: Feedback">turbocvbot@gmail.com</a>
+
+Мы ответим в течение 24 часов."""
+
+MSG_POLICY = "📄 Ознакомьтесь с нашими политиками:"
