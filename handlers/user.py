@@ -557,7 +557,9 @@ async def start_handler(message: Message):
         with Session(engine) as s:
             get_or_create_user(s, tg_id, username, full_name)
     await asyncio.to_thread(_work)
-    await message.answer(START_MESSAGE,reply_markup=start_keyboard())
+    # await message.answer(START_MESSAGE,reply_markup=start_keyboard())
+    await send_question(message.chat.id, "main_language", None)
+
 
 
 @router.callback_query(F.data == "starts")
@@ -1018,7 +1020,9 @@ async def new_interview_handler(message: Message):
         await message.answer(t(MSG_ONLY_START, lang))
         return
 
-    await message.answer(t(START_MESSAGE, lang), reply_markup=start_keyboard())
+    # await message.answer(t(START_MESSAGE, lang), reply_markup=start_keyboard())
+    await send_question(message.chat.id, "main_language", user_db_id)
+
 
 
 # # ──────────────────────────────────────────────────────────────────────────────

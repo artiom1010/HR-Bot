@@ -9,6 +9,7 @@ router = APIRouter()
 
 STEP_LABELS = {
     "main_language": "🌐 Язык общения",
+    "privacy_agreement": "📋 Согласие с политиками",
     "resume_language": "📄 Язык резюме",
     "target_position": "🧭 Желаемая должность",
     "job_description": "🔍 Описание вакансии",
