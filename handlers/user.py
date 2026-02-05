@@ -211,11 +211,11 @@ async def cmd_policy(message: Message):
             url="https://telegra.ph/Privacy-policy-01-20-98"
         )],
         [InlineKeyboardButton(
-            text="📋 Terms & Conditions",
+            text="📋 Terms of Use",
             url="https://telegra.ph/Privacy-policy-01-20-98"
         )],
         [InlineKeyboardButton(
-            text="🍪 Cookies Policy",
+            text="🍪 Data Processing Consent",
             url="https://telegra.ph/Privacy-policy-01-20-98"
         )]
     ])
