@@ -195,7 +195,7 @@
   "📎 Вот пример того, как будет выглядеть твоё резюме:": "📎 Here's an example of what your resume will look like:",
 
   "📄 Отлично, я собрал всю нужную информацию!\nСейчас оформлю профессиональное продающее резюме и подготовлю его в формате PDF и Word.\n\n💳 Стоимость — 10€ / 200 MDL\n\nЧто ты получишь:\n✅ Стильное и структурированное резюме\n✅ Адаптация под вакансию\n✅ Шаблон письма для отклика\n✅ Гайд по самопрезентации": "📄 Great, I've gathered all the necessary information!\nNow I'll create a professional resume and prepare it in PDF and Word formats.\n\n💳 Price — 10€ / 200 MDL\n\nWhat you'll get:\n✅ Stylish and structured resume\n✅ Tailored to the job\n✅ Cover letter template\n✅ Self-presentation guide",
-  "⚠️ Не удалось сгенерировать резюме, попробуй позже.": "⚠️ Failed to generate resume, try later.",
+  "💡 Произошёл технический сбой при создании резюме. Наша команда уже работает над этим. Попробуй снова через /new_interview": "💡 A technical issue occurred while creating your resume. Our team is already working on it. Try again via /new_interview",
   "⚠️ Ошибка при создании счёта, попробуй позже.": "⚠️ Error creating invoice, try later.",
   "Не удалось подготовить резюме. Попробуйте позже.": "Failed to prepare resume. Try later.",
   "Ваше резюме (PDF)": "Your resume (PDF)",

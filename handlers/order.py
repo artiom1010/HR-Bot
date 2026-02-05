@@ -49,7 +49,7 @@ async def create_order_and_run_ai(message: Message, user_db_id: int) -> None:
     # 2. запускаем генерацию
     success = await process_order(order_id)
     if not success:
-        await message.answer(t("⚠️ Не удалось сгенерировать резюме, попробуй позже.", lang))
+        await message.answer(t("💡 Произошёл технический сбой при создании резюме. Наша команда уже работает над этим. Попробуй снова через /new_interview", lang))
         return
     
     try: 

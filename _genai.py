@@ -7,10 +7,9 @@ from sqlalchemy import select
 from _database import engine, Answer, Order, ProcessedData
 from _conf import DO_AGENT_URL, DO_API_TOKEN
 from _utils import logger
+from alerts import alert
 
 PROMPT_TEMPLATE = """Ты опытный IT-рекрутер с 20-летней практикой.
-
-ЗАПРЕЩЕНО копировать исходные данные как есть. Разделители "//" — это служебный формат базы данных; в итоговом резюме их быть НЕ должно. Всегда перефразируй и форматируй текст профессионально.
 
 Твоя задача — переписать ответы в сильное резюме под вакансию, сохранив ВСЕ факты и метрики пользователя. 
 Нельзя отбрасывать проценты/числа/сроки и пояснения после тире («— …») или обороты «за счёт …».
@@ -53,6 +52,7 @@ PROMPT_TEMPLATE = """Ты опытный IT-рекрутер с 20-летней 
 • ОБЯЗАТЕЛЬНО переноси все числа и метрики из достижений без потерь, включая вторые показатели после тире.
 • 5–7 буллитов на место: если задач и достижений больше — объединяй, НО не теряй метрики и пояснения.
 • Длина буллита: ориентир 8–22 слов, без местоимения «я», деловой тон.
+• Если компания не указана или указано "-" — используй пустую строку для company_name.
 
 ПРИМЕР ПРЕОБРАЗОВАНИЯ ДОСТИЖЕНИЯ:
 Исходник: "Повысил точность прогнозов на 18% за 3 мес. за счёт новых моделей — прибыль +12%"
@@ -74,8 +74,22 @@ PROMPT_TEMPLATE = """Ты опытный IT-рекрутер с 20-летней 
 • Где возможно, добавляй измеримые результаты (%, $, количество, скорость, время).
 
 ⚠️ КРИТИЧНО ДЛЯ JSON:
-Внутри всех строковых значений используй \\n (два символа) для переносов.
-НЕ вставляй реальные переносы строк внутри значений — это сломает парсинг.
+1) Внутри строковых значений используй \\n (два символа) для переносов.
+   НЕ вставляй реальные переносы строк внутри значений.
+
+2) ЭКРАНИРОВАНИЕ КАВЫЧЕК в experiences_json (это вложенный JSON внутри строки):
+   Каждая кавычка внутри experiences_json должна быть экранирована: \\"
+   ✅ Правильно: "experiences_json": "[{{\\"company_name\\": \\"Google\\", \\"job_title_experience\\": \\"Developer\\"}}]"
+   ❌ Неправильно: незакрытые или неэкранированные кавычки
+
+3) ПУСТЫЕ ЗНАЧЕНИЯ — используй пустую строку "", НЕ тире, НЕ null, НЕ "N/A":
+   ✅ "company_name": \\"\\"
+   ❌ "company_name": \\"-\\"
+   ❌ "company_name": null
+
+4) НЕТ trailing commas перед закрывающими скобками:
+   ✅ {{"a": 1, "b": 2}}
+   ❌ {{"a": 1, "b": 2,}}
 
 Исходные ответы пользователя:
 {answers_block}
@@ -96,7 +110,42 @@ REQUIRED_KEYS = [
     "contact_links",
 ]
 
-# ───────────────────── helpers ──────────────────────
+
+
+# ===========================
+# JSON fixer
+# ===========================
+def fix_llm_json(raw: str) -> str:
+    """
+    Исправляет типичные ошибки JSON от LLM перед парсингом.
+    """
+    s = raw
+    
+    # 1. Убираем ``` обёртку
+    s = s.strip()
+    s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+    s = re.sub(r"\s*```$", "", s)
+    s = s.strip()
+    
+    # 2. ГЛАВНЫЙ ФИКС: \"-" → \"-\"
+    # Паттерн: \"X" где X — короткое значение БЕЗ скобок
+    s = re.sub(
+        r'\\"([^"\\{}\[\]]{1,5})"(,|\s*\\")',
+        r'\"\1\"\2',
+        s
+    )
+    
+    # 3. Trailing commas: убираем запятую перед } или ]
+    s = re.sub(r',(\s*[}\]])', r'\1', s)
+    
+    return s
+
+
+
+
+# ===========================
+# helpers
+# ===========================
 def _build_answers_block(user_id: int) -> str:
     """Синхронный: вытягивает ответы из БД и склеивает строку."""
     with Session(engine) as s:
@@ -115,19 +164,9 @@ async def build_prompt(user_id: int) -> str:
     return PROMPT_TEMPLATE.format(answers_block=block)
 
 
-
-
-def _sanitize_json_string(s: str) -> str:
-    """Убирает обёртку ``` и возвращает чистый JSON."""
-    s = s.strip()
-    # Убираем ``` обёртку (с или без "json")
-    s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
-    s = re.sub(r"\s*```$", "", s)
-    s = s.strip()
-    return s
-
-
-
+# ===========================
+# GenAI call and processing
+# ===========================
 async def call_do_genai(prompt: str) -> dict | None:
     logger.info("PROMPT TO DO:\n%s", prompt)
 
@@ -160,10 +199,11 @@ async def call_do_genai(prompt: str) -> dict | None:
             logger.info("RAW REPLY FROM DO:\n%r", raw_content)
 
             try:
-                cleaned = _sanitize_json_string(raw_content)
+                cleaned = fix_llm_json(raw_content)
                 data = json.loads(cleaned)
             except json.JSONDecodeError as e:
                 logger.error("GenAI вернул не‑JSON (попытка %s): %s", attempt+1, e)
+                logger.debug("Raw content (first 500): %s", raw_content[:500])
                 await asyncio.sleep(0.8 * (attempt + 1))
                 continue
 
@@ -198,6 +238,16 @@ async def call_do_genai(prompt: str) -> dict | None:
         except Exception as e:
             logger.exception("Unexpected GenAI error: %r", e)
             return None
+
+    error_preview = raw_content[:1500] if 'raw_content' in locals() else 'N/A'
+    await alert.send(
+        f"🔴 LLM JSON Parse Failed\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Попыток: 3/3\n"
+        f"Prompt length: {len(prompt)} chars\n\n"
+        f"Raw ответ:\n{error_preview}",
+        level="ERROR"
+    )
 
     return None  # все попытки исчерпаны
 
