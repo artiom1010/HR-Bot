@@ -53,6 +53,14 @@ def get_statistics(
         dt_to = datetime.utcnow()
     
     with Session(engine) as s:
+        # Общее количество пользователей
+        total_users = s.query(func.count(User.id)).scalar()
+        
+        # Общее количество оплативших пользователей
+        total_paid_users = s.query(func.count(func.distinct(Order.user_id))).filter(
+            Order.paynet_status == PaynetStatus.paid
+        ).scalar()
+
         # 1. Новые пользователи
         new_users = s.query(func.count(User.id)).filter(
             User.created_at >= dt_from,
@@ -96,6 +104,8 @@ def get_statistics(
     
     return {
         "period": {"from": date_from, "to": date_to},
+        "total_users": total_users,
+        "total_paid_users": total_paid_users,
         "new_users": new_users,
         "active_users": active_users,
         "paid_users": paid_users,
