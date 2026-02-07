@@ -409,6 +409,8 @@ MSG_SUPPORT = """💬 <b>Поддержка TurboCV Bot</b>
 Если у вас есть вопросы или предложения:
 📧 <a href="mailto:turbocvbot@gmail.com?subject=TurboCV-Bot: Feedback">turbocvbot@gmail.com</a>
 
+При возникновении ошибки, укажите время и Ваш телеграм username в письме.
+
 Мы ответим в течение 24 часов."""
 
 MSG_POLICY = "📄 Ознакомьтесь с нашими политиками:"
