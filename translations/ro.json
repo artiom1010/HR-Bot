@@ -194,7 +194,7 @@
   "📎 Вот пример того, как будет выглядеть твоё резюме:": "📎 Iată un exemplu cum va arăta CV-ul tău:",
 
   "📄 Отлично, я собрал всю нужную информацию!\nСейчас оформлю профессиональное продающее резюме и подготовлю его в формате PDF и Word.\n\n💳 Стоимость — 10€ / 200 MDL\n\nЧто ты получишь:\n✅ Стильное и структурированное резюме\n✅ Адаптация под вакансию\n✅ Шаблон письма для отклика\n✅ Гайд по самопрезентации": "📄 Grozav, am adunat toate informațiile necesare!\nAcum voi crea un CV profesional și îl voi pregăti în formate PDF și Word.\n\n💳 Preț — 10€ / 200 MDL\n\nCe vei primi:\n✅ CV stilizat și structurat\n✅ Adaptat la postul dorit\n✅ Șablon de scrisoare de intenție\n✅ Ghid de autoprezentare",
-  "💡 Произошёл технический сбой при создании резюме. Наша команда уже работает над этим. Попробуй снова через /new_interview": "💡 A apărut o eroare tehnică la crearea CV-ului. Echipa noastră deja lucrează la remedierea problemei. Încearcă din nou prin /new_interview",
+  "💡 Не удалось сгенерировать резюме.\nПожалуйста, обратитесь в поддержку, отправив команду /support": "💡 Nu s-a reușit generarea CV-ului.\nVă rugăm să contactați suportul trimițând comanda /support",
   "⚠️ Ошибка при создании счёта, попробуй позже.": "⚠️ Eroare la crearea facturii, încearcă mai târziu.",
   "Не удалось подготовить резюме. Попробуйте позже.": "Nu s-a putut pregăti CV-ul. Încearcă mai târziu.",
   "Ваше резюме (PDF)": "CV-ul tău (PDF)",
@@ -204,7 +204,7 @@
 
   "💰 Оплата получена!\nНажми кнопку ниже, чтобы скачать резюме.": "💰 Plata primită!\nApasă butonul de mai jos pentru a descărca CV-ul.",
 
-  "💬 <b>Поддержка TurboCV Bot</b>\n\nЕсли у вас есть вопросы или предложения:\n📧 <a href=\"mailto:turbocvbot@gmail.com?subject=TurboCV-Bot: Feedback\">turbocvbot@gmail.com</a>\n\nМы ответим в течение 24 часов.": "💬 <b>Suport TurboCV Bot</b>\n\nDacă aveți întrebări sau sugestii:\n📧 <a href=\"mailto:turbocvbot@gmail.com?subject=TurboCV-Bot: Feedback\">turbocvbot@gmail.com</a>\n\nVă vom răspunde în 24 de ore.",
+  "💬 <b>Поддержка TurboCV Bot</b>\n\nЕсли у вас есть вопросы или предложения:\n📧 <a href=\"mailto:turbocvbot@gmail.com?subject=TurboCV-Bot: Feedback\">turbocvbot@gmail.com</a>\n\nПри возникновении ошибки, укажите время и Ваш телеграм username в письме.\n\nМы ответим в течение 24 часов.": "💬 <b>Suport TurboCV Bot</b>\n\nDacă aveți întrebări sau sugestii:\n📧 <a href=\"mailto:turbocvbot@gmail.com?subject=TurboCV-Bot: Feedback\">turbocvbot@gmail.com</a>\n\nÎn cazul unei erori, vă rugăm să indicați ora și username-ul dvs. de Telegram în mesaj.\n\nVă vom răspunde în 24 de ore.",
 
   "📄 Ознакомьтесь с нашими политиками:": "📄 Consultați politicile noastre:"
 
