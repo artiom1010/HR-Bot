@@ -49,16 +49,6 @@ def _row_to_context(row: ProcessedData) -> Dict[str, Any]:
     return context
 
 
-# def _render_html(context: dict) -> str:
-#     """
-#     Рендерит HTML-строку по шаблону Jinja2.
-#     """
-#     env = Environment(
-#         loader=FileSystemLoader(str(TEMPLATES_DIR)),
-#         autoescape=select_autoescape(["html", "xml"])
-#     )
-#     template = env.get_template(TEMPLATE_HTML.name)
-#     return template.render(**context)
 from labels import RESUME_LABELS
 def _render_html(context: dict) -> str:
     env = Environment(
@@ -106,7 +96,6 @@ def build_resume(order_id: int, make_pdf: bool = True, make_docx: bool = True) -
     # 3) Подготавливаем имена и директории
     OUT_DIR.mkdir(exist_ok=True)
 
-    # base_name = (row.cv_naming or f"resume_{order_id}").rsplit(".", 1)[0]
     base_name = (cv_naming or f"resume_{order_id}").rsplit(".", 1)[0]  # ← используем переменную
     
     html_path = OUT_DIR / f"{base_name}.html"
@@ -133,10 +122,7 @@ def build_resume(order_id: int, make_pdf: bool = True, make_docx: bool = True) -
     if make_docx:
         if shutil.which("pandoc") is None:
             raise RuntimeError("Pandoc не найден в PATH. Установи pandoc и повтори.")
-        # subprocess.run(
-        #     ["pandoc", str(html_path), "-o", str(docx_path)],
-        #     check=True
-        # )
+
         subprocess.run(
             [
                 "pandoc", str(html_path), "-t", "docx", "-o", str(docx_path),
