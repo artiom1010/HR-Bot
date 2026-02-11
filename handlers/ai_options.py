@@ -220,9 +220,10 @@ def _build_values_prompt(position: str, lang_code: str) -> str:
 - Формат: навык или "Навык1 / Навык2" (если 1 слово — объедини).
 - Примеры ✅: "Работа с CRM", "Python / SQL", "Анализ данных".
 - Примеры ❌: "CRM" (слишком коротко), "Навыки работы с системами" (слишком длинно).
+- Отдавай пункты на языке: "{lang_code}". Если {lang_code} неизвестен — используй английский.
 
 ТРЕБОВАНИЯ К "value":
-- Латиница, kebab-case, 2–4 слова, уникальные.
+- Латиница, kebab-case, 4 слова, уникальные.
 - Пример: "crm-management", "python-sql", "data-analysis".
 
 ЗАПРЕЩЕНО:
@@ -233,8 +234,8 @@ def _build_values_prompt(position: str, lang_code: str) -> str:
 
 ФОРМАТ ОТВЕТА (только JSON, без текста):
 [
-  {{"value":"crm-management","label":"Работа с CRM"}},
-  {{"value":"data-analysis","label":"Анализ данных"}}
+  {{"value":"crm-management","label":"пункт из Skills CV bot - Лист1.pdf"}},
+  {{"value":"data-analysis","label":"пункт из Skills CV bot - Лист1.pdf"}}
 ]
 """.strip()
 
