@@ -30,9 +30,24 @@ def get_first_unanswered(session: Session, user_id: int, question_flow: list[tup
     return None
 
 
+# def save_answer(session: Session, user_id: int, question_key: str, answer_text: str) -> None:
+#     answer = Answer(user_id=user_id, question_key=question_key, answer=answer_text)
+#     session.add(answer)
+#     log_step(session, user_id, question_key, answer_text)
+#     session.commit()
 def save_answer(session: Session, user_id: int, question_key: str, answer_text: str) -> None:
-    answer = Answer(user_id=user_id, question_key=question_key, answer=answer_text)
-    session.add(answer)
+    # Проверяем, есть ли уже ответ на этот вопрос
+    existing = session.query(Answer).filter_by(
+        user_id=user_id, 
+        question_key=question_key
+    ).first()
+    
+    if existing:
+        existing.answer = answer_text  # Обновляем
+    else:
+        answer = Answer(user_id=user_id, question_key=question_key, answer=answer_text)
+        session.add(answer)  # Создаём новый
+    
     log_step(session, user_id, question_key, answer_text)
     session.commit()
 
