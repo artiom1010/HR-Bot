@@ -3,7 +3,7 @@ import traceback
 import logging
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, text
 from datetime import datetime
 
 from _database import engine, Order, PaynetStatus
@@ -11,6 +11,9 @@ from _key import get_download_keyboard
 from handlers.bot_app import bot
 from handlers.db_helpers import get_user_lang
 from i18n import t
+from stats_api import router as stats_router
+
+from _conf import (LINKSUCCESS, LINKERROR)
 
 app = FastAPI()
 
@@ -61,8 +64,8 @@ async def paynet_notify(req: Request):
 @app.get("/paynet/getform", response_class=HTMLResponse)
 async def get_form(
     operation: str        = Query(...),
-    LinkUrlSuccess: str   = Query("https://t.me/hr_md_bot"),
-    LinkUrlCancel: str    = Query("https://google.com"),
+    LinkUrlSuccess: str   = Query(LINKSUCCESS),
+    LinkUrlCancel: str    = Query(LINKERROR),
     ExpiryDate: str       = Query(...),
     Signature: str        = Query(...),
     Lang: str             = Query("ru")
@@ -85,8 +88,7 @@ async def get_form(
     return HTMLResponse(html)
 
 
-from stats_api import router as stats_router
-from sqlalchemy import text
+
 app.include_router(stats_router)
 
 @app.head("/stats")
