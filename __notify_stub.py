@@ -3,8 +3,9 @@ import traceback
 import logging
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse
-from sqlalchemy.orm import Session, text
+from sqlalchemy.orm import Session
 from datetime import datetime
+from sqlalchemy import text
 
 from _database import engine, Order, PaynetStatus
 from _key import get_download_keyboard
