@@ -208,15 +208,15 @@ async def cmd_policy(message: Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🔒 Privacy Policy",
-            url="https://telegra.ph/Privacy-policy-01-20-98"
+            url="https://turbocv.md/privacy"
         )],
         [InlineKeyboardButton(
             text="📋 Terms of Use",
-            url="https://telegra.ph/Privacy-policy-01-20-98"
+            url="https://turbocv.md/terms-of-use"
         )],
         [InlineKeyboardButton(
             text="🍪 Data Processing Consent",
-            url="https://telegra.ph/Privacy-policy-01-20-98"
+            url="https://turbocv.md/data-processing"
         )]
     ])
     
