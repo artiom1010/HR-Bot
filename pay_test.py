@@ -1,10 +1,9 @@
-import os, json, httpx, time, random
+import httpx, random
 from sqlalchemy.orm import Session
 import urllib
 from _database import engine, Order
 
 from datetime import datetime, timedelta
-from _utils import logger
 
 from _conf import (
     PUBLIC_BASE,
@@ -13,8 +12,8 @@ from _conf import (
     API_USER,
     API_PASS,
     CURRENCY,
-    NOTIFY_LINK_OK,
-    NOTIFY_LINK_NG
+    LINKSUCCESS,
+    LINKERROR
 )
 
 # --- Сервисные функции -------------------------------------------
@@ -46,8 +45,8 @@ def register_payment(order_id: int):
     body = {
         "Invoice": order.invoice,
         "MerchantCode": MERCHANT_CODE,
-        "LinkUrlSuccess": NOTIFY_LINK_OK,
-        "LinkUrlCancel":  NOTIFY_LINK_NG,
+        "LinkUrlSuccess": LINKSUCCESS,
+        "LinkUrlCancel":  LINKERROR,
         "Signature": "null",
         "SignVersion": "v01",
         "Customer": {
@@ -110,8 +109,8 @@ def register_payment(order_id: int):
 
     params = {
         "operation":      str(payment_id),
-        "LinkUrlSuccess": NOTIFY_LINK_OK,
-        "LinkUrlCancel":  NOTIFY_LINK_NG,
+        "LinkUrlSuccess": LINKSUCCESS,
+        "LinkUrlCancel":  LINKERROR,
         "ExpiryDate":     expirydate,
         "Signature":      signature,
         "Lang":           "ru"
