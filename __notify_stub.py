@@ -72,6 +72,13 @@ async def get_form(
     Lang: str             = Query("ru")
 ):
 
+    print(f"DEBUG getform:")
+    print(f"  operation: {operation}")
+    print(f"  LinkUrlSuccess: {LinkUrlSuccess}")
+    print(f"  LinkUrlCancel: {LinkUrlCancel}")
+    print(f"  LINKSUCCESS from conf: {LINKSUCCESS}")
+    print(f"  LINKERROR from conf: {LINKERROR}")
+    
     html = f'''
 <form method="POST" action="https://test.paynet.md/acquiring/getecom">
     <input type="hidden" name="operation"      value="{operation}"/>
