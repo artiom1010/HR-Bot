@@ -78,11 +78,11 @@ async def get_form(
     print(f"  LinkUrlCancel: {LinkUrlCancel}")
     print(f"  LINKSUCCESS from conf: {LINKSUCCESS}")
     print(f"  LINKERROR from conf: {LINKERROR}")
-    
+
     html = f'''
 <form method="POST" action="https://test.paynet.md/acquiring/getecom">
     <input type="hidden" name="operation"      value="{operation}"/>
-    <input type="hidden" name="LinkUrlSuccess" value="{LinkUrlSuccess}"/>
+    <input type="hidden" name="LinkUrlSucces" value="{LinkUrlSuccess}"/>
     <input type="hidden" name="LinkUrlCancel"  value="{LinkUrlCancel}"/>
     <input type="hidden" name="ExpiryDate"     value="{ExpiryDate}"/>
     <input type="hidden" name="Signature"      value="{Signature}"/>
