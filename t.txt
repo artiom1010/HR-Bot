@@ -1,0 +1,13 @@
+http://161.35.152.250:8000/paynet/getform?
+
+operation=314226&
+
+LinkUrlSuccess=https://turbocv.md/thank-you&
+
+LinkUrlCancel=https://turbocv.md/payment-fail&
+
+ExpiryDate=2026-02-13T20:41:10&
+
+Signature=d1f92d4462398f5d12e9984312a72608&
+
+Lang=ru
