@@ -94,7 +94,7 @@ EXP_POSITION_MAX  = 50
 # ──────────────────────────────────────────────────────────────────────────────
 # Gate
 # ──────────────────────────────────────────────────────────────────────────────
-BUTTON_TEXT_STEPS = {"job_description", "contact_links"}
+BUTTON_TEXT_STEPS = {"job_description"}
 
 # >>> НОВОЕ: мастер-шаги, где по умолчанию ожидаются КНОПКИ
 BUTTON_ONLY_MASTER_STEPS = {
@@ -410,7 +410,7 @@ async def send_question(chat_id: int, qkey: str, user_id: int | None = None):
 
     # ВАЖНО: если это клавиатурный шаг — включаем ворота
     if user_id and markup:
-        if qkey not in ("job_description", "contact_links"):
+        if qkey not in ["job_description"]:
             open_text_gate(user_id, qkey)
 
 
@@ -697,6 +697,12 @@ async def handle_answer(message: Message, user_id: int | None = None):
         with Session(engine) as s:
             return get_user_lang(s, user_id) if user_id else "ru"
     lang = await asyncio.to_thread(_get_lang)
+
+    # Проверка ворот 
+    gate_key = gate_for(user_id)
+    if gate_key:
+        await message.answer(t(KEYBOARD_ONLY_MSG, lang))
+        return
 
 
     # ------- утилиты -------
