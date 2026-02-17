@@ -268,7 +268,7 @@ LANG_LEVELS = [
     ("elem", "Elementary"),
     ("int",  "Intermediate"),
     ("adv",  "Advanced"),
-    ("nat",  "Native (или Fluent)"),
+    ("nat",  "Native (Fluent)"),
 ]
 
 
