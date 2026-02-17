@@ -1,3 +1,4 @@
+import logging
 import re
 import asyncio
 from aiogram import Router, F
@@ -95,6 +96,7 @@ EXP_POSITION_MAX  = 50
 # Gate
 # ──────────────────────────────────────────────────────────────────────────────
 BUTTON_TEXT_STEPS = {"job_description"}
+FREE_INPUT_WITH_BUTTON = {"contact_links"}
 
 # >>> НОВОЕ: мастер-шаги, где по умолчанию ожидаются КНОПКИ
 BUTTON_ONLY_MASTER_STEPS = {
@@ -114,6 +116,8 @@ def _is_button_step(session: Session, user_id: int, qkey: str) -> bool:
     base = qkey.split("::", 1)[1] if "::" in qkey else qkey
     if base in BUTTON_TEXT_STEPS:
         return False
+    if base in FREE_INPUT_WITH_BUTTON:  # 👈 новое
+        return True
     if base in MULTI_SELECT_KEYS or base.startswith("summary_"):
         return True
     pairs = get_options(base, user_id, None, None)
@@ -123,7 +127,6 @@ def _is_button_step(session: Session, user_id: int, qkey: str) -> bool:
 
 _text_gate: dict[int, str] = {}
 
-import logging
 glog = logging.getLogger("gate")
 
 def open_text_gate(user_id: int, key: str) -> None:
@@ -634,7 +637,6 @@ def _store_tmp_selection(s, user_id: int, qkey: str, text: str) -> None:
     replace_draft(s, user_id, parent_key=TMP_PARENT, step_key=_tmp_key_for(qkey), value=text or "")
 
 def _load_tmp_selection(s, user_id: int, qkey: str) -> str:
-    from handlers.db_helpers import get_draft_value
     return (get_draft_value(s, user_id, parent_key=TMP_PARENT, step_key=_tmp_key_for(qkey)) or "").strip()
 
 def _clear_tmp_selection(s, user_id: int, qkey: str) -> None:
@@ -698,11 +700,7 @@ async def handle_answer(message: Message, user_id: int | None = None):
             return get_user_lang(s, user_id) if user_id else "ru"
     lang = await asyncio.to_thread(_get_lang)
 
-    # Проверка ворот 
-    gate_key = gate_for(user_id)
-    if gate_key:
-        await message.answer(t(KEYBOARD_ONLY_MSG, lang))
-        return
+
 
 
     # ------- утилиты -------
@@ -716,7 +714,6 @@ async def handle_answer(message: Message, user_id: int | None = None):
         return f"{ms_text}, {human}" if (ms_text and human) else (ms_text or human)
 
     def _get_tmp_ms_text(s, user_id: int, qkey: str) -> str:
-        from handlers.db_helpers import get_draft_value
         return get_draft_value(s, user_id, parent_key="__tmp__", step_key=f"ms::{qkey}") or ""
 
     def _clear_tmp_ms_text(s, user_id: int, qkey: str):
@@ -1089,7 +1086,6 @@ async def handle_flow(callback: CallbackQuery):
                 if not user: 
                     return None, None, "ru"
                 if key == "courses":
-                    from handlers.db_helpers import get_drafts_values_ordered
                     parts = get_drafts_values_ordered(s, user.id, "courses")
                     combined = " // ".join(parts) if parts else ""
                     save_answer(s, user.id, "courses", combined)
@@ -1293,14 +1289,12 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
 
         def _role():
             with Session(engine) as s:
-                from handlers.db_helpers import get_draft_value
                 return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
         role = (await asyncio.to_thread(_role)) or ""
         role_norm = normalize_position(role)
         
         def _tasks_text():
             with Session(engine) as s:
-                from handlers.db_helpers import get_draft_value
                 return get_draft_value(s, user_id, parent_key=parent, step_key="experience_tasks") or ""
         tasks_text = (await asyncio.to_thread(_tasks_text)) or ""
 
@@ -1329,7 +1323,6 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
 
         def _role():
             with Session(engine) as s:
-                from handlers.db_helpers import get_draft_value
                 return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
         role = (await asyncio.to_thread(_role)) or ""
         role_norm = normalize_position(role)
@@ -1948,7 +1941,6 @@ async def handle_multiselect(callback: CallbackQuery):
                 parent = qkey.split("::", 1)[0]
                 def _role():
                     with Session(engine) as s:
-                        from handlers.db_helpers import get_draft_value
                         return get_draft_value(s, user_id, parent_key=parent, step_key="experience_title")
                 role_for_exp = await asyncio.to_thread(_role)
             role_for_exp_norm = normalize_position(role_for_exp)
