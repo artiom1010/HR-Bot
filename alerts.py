@@ -49,6 +49,36 @@ class AlertClient:
             self._dedupe_ts[key] = now
             await self.send(text, level=level)
 
+    async def send_document(self, file_path: str, caption: str = "") -> bool:
+        """Отправляет файл в алерт-каналы."""
+        if not self.tg_token or not self.tg_chat_ids:
+            return False
+        
+        ok = False
+        timeout = aiohttp.ClientTimeout(total=30)
+        url = f"https://api.telegram.org/bot{self.tg_token}/sendDocument"
+        
+        async with aiohttp.ClientSession(timeout=timeout) as s:
+            for chat_id in self.tg_chat_ids:
+                try:
+                    with open(file_path, "rb") as f:
+                        data = aiohttp.FormData()
+                        data.add_field("chat_id", chat_id)
+                        data.add_field("document", f, filename=os.path.basename(file_path))
+                        if caption:
+                            data.add_field("caption", caption[:1024])
+                        
+                        resp = await s.post(url, data=data)
+                        if resp.status == 200:
+                            ok = True
+                        else:
+                            body = (await resp.text())[:500]
+                            logging.warning("alert.send_document TG %s: %s", resp.status, body)
+                except Exception as e:
+                    logging.exception("alert.send_document failed: %s", e)
+                await asyncio.sleep(0.05)
+        return ok
+
     @staticmethod
     def exc_text(e: BaseException, extra: dict | None = None) -> str:
         tb = "".join(traceback.format_exception(type(e), e, e.__traceback__))

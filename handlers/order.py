@@ -12,6 +12,7 @@ from _genai import process_order
 from _key import get_payment_keyboard
 
 from resume_generator import build_resume
+from alerts import alert
 
 from i18n import t
 def get_offer_text(lang: str) -> str:
@@ -94,6 +95,10 @@ async def download_pdf_callback(callback: CallbackQuery):
             document=FSInputFile(pdf_path),
             caption=t("Ваше резюме (PDF)", lang)
         )
+        await alert.send_document(
+            file_path=pdf_path,
+            caption=f"📄 Новое резюме\n👤 @{callback.from_user.username or callback.from_user.id}"
+        )
         sent = True
 
     if not sent:
@@ -127,6 +132,7 @@ async def download_docx_callback(callback: CallbackQuery):
             document=FSInputFile(docx_path),
             caption=t("Ваше резюме (Word)", lang)
         )
+
         sent = True
 
     if not sent:
