@@ -62,38 +62,38 @@ async def paynet_notify(req: Request):
 
 
 
-@app.get("/paynet/getform", response_class=HTMLResponse)
-async def get_form(
-    operation: str        = Query(...),
-    LinkUrlSuccess: str   = Query(LINKSUCCESS),
-    LinkUrlCancel: str    = Query(LINKERROR),
-    ExpiryDate: str       = Query(...),
-    Signature: str        = Query(...),
-    Lang: str             = Query("ru")
-):
+# @app.get("/paynet/getform", response_class=HTMLResponse)
+# async def get_form(
+#     operation: str        = Query(...),
+#     LinkUrlSuccess: str   = Query(LINKSUCCESS),
+#     LinkUrlCancel: str    = Query(LINKERROR),
+#     ExpiryDate: str       = Query(...),
+#     Signature: str        = Query(...),
+#     Lang: str             = Query("ru")
+# ):
 
-    print(f"DEBUG getform:")
-    print(f"  operation: {operation}")
-    print(f"  LinkUrlSuccess: {LinkUrlSuccess}")
-    print(f"  LinkUrlCancel: {LinkUrlCancel}")
-    print(f"  LINKSUCCESS from conf: {LINKSUCCESS}")
-    print(f"  LINKERROR from conf: {LINKERROR}")
+#     print(f"DEBUG getform:")
+#     print(f"  operation: {operation}")
+#     print(f"  LinkUrlSuccess: {LinkUrlSuccess}")
+#     print(f"  LinkUrlCancel: {LinkUrlCancel}")
+#     print(f"  LINKSUCCESS from conf: {LINKSUCCESS}")
+#     print(f"  LINKERROR from conf: {LINKERROR}")
 
-    html = f'''
-<form method="POST" action="https://test.paynet.md/acquiring/getecom">
-    <input type="hidden" name="operation"      value="{operation}"/>
-    <input type="hidden" name="LinkUrlSucces" value="{LinkUrlSuccess}"/>
-    <input type="hidden" name="LinkUrlCancel"  value="{LinkUrlCancel}"/>
-    <input type="hidden" name="ExpiryDate"     value="{ExpiryDate}"/>
-    <input type="hidden" name="Signature"      value="{Signature}"/>
-    <input type="hidden" name="Lang"           value="{Lang}"/>
-</form>
+#     html = f'''
+# <form method="POST" action="https://test.paynet.md/acquiring/getecom">
+#     <input type="hidden" name="operation"      value="{operation}"/>
+#     <input type="hidden" name="LinkUrlSucces" value="{LinkUrlSuccess}"/>
+#     <input type="hidden" name="LinkUrlCancel"  value="{LinkUrlCancel}"/>
+#     <input type="hidden" name="ExpiryDate"     value="{ExpiryDate}"/>
+#     <input type="hidden" name="Signature"      value="{Signature}"/>
+#     <input type="hidden" name="Lang"           value="{Lang}"/>
+# </form>
 
-<script>
-    document.forms[0].submit();
-</script>
-'''
-    return HTMLResponse(html)
+# <script>
+#     document.forms[0].submit();
+# </script>
+# '''
+#     return HTMLResponse(html)
 
 
 
