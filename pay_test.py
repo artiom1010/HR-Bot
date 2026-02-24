@@ -34,8 +34,10 @@ def get_token() -> str:
 def register_payment(order_id: int):
     
     now = datetime.now()
-    external_dt = now
-    expiry_dt = now + timedelta(hours=5)
+    # external_dt = now
+    # expiry_dt = now + timedelta(hours=5)
+    external_dt = int(now.timestamp())
+    expiry_dt = int((now + timedelta(hours=5)).timestamp())
 
     with Session(engine) as s:
         order = s.get(Order, order_id)
@@ -62,8 +64,8 @@ def register_payment(order_id: int):
             },
         "Payer": "null",
         "Currency": CURRENCY,
-        "ExternalDate": external_dt.isoformat(timespec="seconds"),
-        "ExpiryDate": expiry_dt.isoformat(timespec="seconds"),
+        "ExternalDate": external_dt,
+        "ExpiryDate": expiry_dt,
         "Services": [{
             "Name": "HR-Bot Resume",
             "Description": "Professional CV",
@@ -116,4 +118,4 @@ def register_payment(order_id: int):
         "Lang":           "ru"
     }
     query = urllib.parse.urlencode(params)
-    return f"{PUBLIC_BASE}/paynet/getform?{query}"
+    return f"{PUBLIC_BASE}/paynet/proxy?{query}"
