@@ -111,11 +111,11 @@ def register_payment(order_id: int):
 
     params = {
         "operation":      str(payment_id),
-        "LinkUrlSuccess": LINKSUCCESS,
-        "LinkUrlCancel":  LINKERROR,
+        # "LinkUrlSuccess": LINKSUCCESS,
+        # "LinkUrlCancel":  LINKERROR,
         "ExpiryDate":     expirydate,
         "Signature":      signature,
-        "Lang":           "ru"
+        # "Lang":           "ru"
     }
     query = urllib.parse.urlencode(params)
     return f"{PUBLIC_BASE}/paynet/proxy?{query}"
