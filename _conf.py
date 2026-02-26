@@ -9,7 +9,6 @@ DO_AGENT_URL    = os.getenv("DO_AGENT_URL")
 
 PUBLIC_BASE     = os.getenv("PUBLIC_BASE")
 API_BASE_URL    = os.getenv("API_BASE_URL")
-PORTAL_BASE_URL = os.getenv("PORTAL_BASE_URL")
 MERCHANT_CODE   = os.getenv("MERCHANT_CODE")
 API_USER        = os.getenv("API_USER")
 API_PASS        = os.getenv("API_PASS")
