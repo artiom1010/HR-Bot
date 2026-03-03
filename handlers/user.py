@@ -821,6 +821,8 @@ async def handle_answer(message: Message, user_id: int | None = None):
             if free_qkey in ("full_name", "contact_phone", "contact_email", "contact_links"):
                 ok, normalized, err, hint = validate_field(free_qkey, text_in, lang)
                 if not ok:
+                    set_free_wait(s, user.id, free_qkey)  # оставляем ворота открытыми
+                    s.commit()
                     return user.id, None, "bad_input", hint
                 text_in = normalized
 
