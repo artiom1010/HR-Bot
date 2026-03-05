@@ -448,7 +448,7 @@ def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
 # =========================
 # ЗАПРОС К ТВОЕМУ DO-АГЕНТУ
 # =========================
-async def ask_llm(prompt: str, *, read_timeout: float = 60.0, retries: int = 1, tag: str = "") -> str:
+async def ask_llm(prompt: str, *, read_timeout: float = 120.0, retries: int = 1, tag: str = "") -> str:
     """
     Шлём промпт в DO-агент и возвращаем ЧИСТЫЙ текст JSON-массива.
     - read_timeout: таймаут на чтение (сек)
@@ -612,7 +612,7 @@ async def generate_experience_tasks_options(user_id: int, role_title: str, *, no
             return None
 
         prompt = _build_exp_tasks_prompt(role, lang_code)
-        raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
+        raw    = await ask_llm(prompt, read_timeout=120.0, retries=1)
         items  = _parse_items(raw)  # 7–8 нормализованных пунктов
 
         for it in items:
@@ -729,7 +729,7 @@ async def generate_experience_achievements_examples(
         tasks_text = tasks_text or ""   
 
         prompt = _build_exp_achievements_from_tasks_prompt(role, tasks_text, lang_code)
-        raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
+        raw    = await ask_llm(prompt, read_timeout=120.0, retries=1)
         items  = _parse_examples_to_items(raw)
 
         for it in items:
@@ -784,7 +784,7 @@ async def generate_skills_tools_options(user_id: int) -> list[str] | None:
         pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
         prompt = _build_skills_tools_prompt(pos_norm, lang_code)
-        raw    = await ask_llm(prompt, read_timeout=60.0, retries=1)
+        raw    = await ask_llm(prompt, read_timeout=120.0, retries=1)
         items  = _parse_items(raw, max_len=70)
 
         for it in items:
