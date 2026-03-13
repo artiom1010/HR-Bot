@@ -1301,7 +1301,29 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
         tasks_text = (await asyncio.to_thread(_tasks_text)) or ""
 
         # 🔔 ХУК: генерация достижений для опыта работы
-        await generate_experience_achievements_examples(user_id, role_norm or role, tasks_text=tasks_text, notify=True,)
+        achievement_labels = await generate_experience_achievements_examples(
+            user_id,
+            role_norm or role,
+            tasks_text=tasks_text
+        )
+        from handlers.ai_options import get_user_identity
+        from alerts import alert
+        username, full_name, _ = get_user_identity(user_id)
+
+        txt = "\n".join([
+            f"Username: @{username or '-'}",
+            f"Full name: {full_name or '-'}",
+            "",
+            f"Experience role: {role_norm or role}",
+            "",
+            "Tasks:",
+            tasks_text,
+            "",
+            "Achievements:",
+            "- " + "\n- ".join(achievement_labels or [])
+        ])
+
+        await alert.send(txt, level="INFO")
         return
 
     if step_key == "experience_best_qualities":
