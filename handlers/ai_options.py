@@ -35,43 +35,31 @@ def _slugify(text: str) -> str:
     return t[:40] or "item"
 
 
-def _clean_label(label: str, max_len: int = 30) -> str:
-    """
-    Очищаем и аккуратно обрезаем label:
-    - убираем переносы/кавычки;
-    - если строка длиннее max_len, режем по границе слова, а не посередине.
-    """
+def _clean_label(label: str, max_len: int = 35) -> str:
     lab = (label or "").replace("\n", " ").strip()
     lab = lab.strip(' "\'')
-    if len(lab) <= max_len:
-        return lab
-    # грубо обрезаем и откатываемся к последнему пробелу
-    cut = lab[:max_len]
-    if " " in cut:
-        cut = cut.rsplit(" ", 1)[0]
-
-    return cut.strip()
+    return lab
 
 
 
-def _ensure_unique_7_8(items: List[Dict[str, str]], max_len: int = 30) -> List[Dict[str, str]]:
-    out: List[Dict[str, str]] = []
-    seen = set()
-    for it in items:
-        v = _slugify(it.get("value") or it.get("label", ""))
-        l = _clean_label(it.get("label", ""), max_len=max_len)
-        if not l or v in seen:
-            continue
-        seen.add(v)
-        out.append({"value": v, "label": l})
-        if len(out) >= 8:
-            break
-    if len(out) < 7:
-        raise ValueError("Нужно 7–8 уникальных пунктов")
-    return out[:8]
+# def _ensure_unique_7_8(items: List[Dict[str, str]], max_len: int = 35) -> List[Dict[str, str]]:
+#     out: List[Dict[str, str]] = []
+#     seen = set()
+#     for it in items:
+#         v = _slugify(it.get("value") or it.get("label", ""))
+#         l = _clean_label(it.get("label", ""), max_len=max_len)
+#         if not l or len(l) > max_len or v in seen:
+#             continue
+#         seen.add(v)
+#         out.append({"value": v, "label": l})
+#         if len(out) >= 8:
+#             break
+#     if len(out) < 7:
+#         raise ValueError("Нужно 7–8 уникальных пунктов")
+#     return out[:8]
 
 
-def _parse_items(raw_text: str, *, max_len: int = 30) -> List[Dict[str, str]]:
+def _parse_items(raw_text: str, *, max_len: int = 35) -> List[Dict[str, str]]:
     """Принимаем строку с JSON-массивом и возвращаем нормализованный список словарей."""
     s = (raw_text or "").strip()
     try:
@@ -92,10 +80,11 @@ def _parse_items(raw_text: str, *, max_len: int = 30) -> List[Dict[str, str]]:
         raw_val = (it.get("value") or it.get("label", "")).strip()
         val = _slugify(raw_val)
         lab = _clean_label(it.get("label", ""), max_len=max_len)
-        if not lab:
+        if not lab or len(lab) > max_len:
             continue
         cleaned.append({"value": val, "label": lab})
-    return _ensure_unique_7_8(cleaned, max_len=max_len)
+    # return _ensure_unique_7_8(cleaned, max_len=max_len)
+    return cleaned
 
 
 
@@ -144,7 +133,7 @@ def get_user_identity(user_id: int) -> tuple[str, str, int | None]:
 # =========================
 # ПРОМПТЫ
 # =========================
-LABEL_MAX_CHARS = 25
+LABEL_MAX_CHARS = 30
 ITEMS_COUNT = 8
 
 def _build_tasks_prompt(position: str, lang_code: str) -> str:
@@ -181,29 +170,6 @@ def _build_tasks_prompt(position: str, lang_code: str) -> str:
 """.strip()
 
 
-# ==== main skills from file  ====
-# def _build_values_prompt(position: str, lang_code: str) -> str:
-#     return f"""
-# ЗАДАЧА: Найти в Базе знаний точный список скиллов для профессии: "{position}".
-# ОТВЕТ:
-# - ЕСЛИ подходящей профессии или точных пунктов «из базы» нет - всё равно верни 7–8 уместных пунктов, опираясь на свои знания о профессии.
-# - НЕ пиши в ответе, что в базе чего-то нет, НЕ добавляй никаких пояснений, только JSON.
-# - Отдавай пункты на языке: "{lang_code}". Если {lang_code} неизвестен — используй английский.
-# - Если в пункте всего 1 слово, можешь скомбинировать его с соседним пунктом через /, чтобы получилось 2-3 слова.
-# ЗАПРЕТ: не использовать внешние знания.
-
-# ТРЕБОВАНИЯ К СПИСКУ:
-# - Пунктов всего должно быть 7-8.
-# - "label": ≤ 30 символов, если больше – пропусти.
-# - Если в пункте всего 1 слово, можешь скомбинировать его с соседним пунктом через "/" (2–4 слова).
-
-
-# ФОРМАТ ОТВЕТА:
-# [
-#   {{"value":"<slug-latin-kebab>","label":"[пункт из Skills CV bot - Лист1.pdf]"}},
-#   {{"value":"<slug-latin-kebab>","label":"[пункт из Skills CV bot - Лист1.pdf]"}}
-# ]
-# """.strip()
 def _build_values_prompt(position: str, lang_code: str) -> str:
     return f"""
 Сгенерируй НАВЫКИ/СКИЛЛЫ (skills) для роли "{position}".
@@ -240,34 +206,7 @@ def _build_values_prompt(position: str, lang_code: str) -> str:
 """.strip()
 
 
-# ==== experience_tasks ====
-# def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
-#     return f"""
-# Сгенерируй 7–8 рабочих ЗАДАЧ для должности "{role_title}".
-# Язык меток (label): "{lang_code}".
 
-# ТРЕБОВАНИЯ К "label":
-# - ГЛАВНОЕ: каждая фраза должна быть ЗАКОНЧЕННОЙ и понятной.
-# - Формат: глагол + полное существительное + контекст (если нужен).
-# - Длина: стремись к 25–35 символам, но смысл важнее длины.
-# - Если фраза длиннее 35 символов — сократи БЕЗ потери смысла.
-
-# ПРИМЕРЫ ПРАВИЛЬНО:
-# - "Обрабатывать лиды в CRM"
-# - "Готовить отчёты по продажам"
-# - "Проверять качество данных"
-
-# ПРИМЕРЫ НЕПРАВИЛЬНО:
-# - "Вести инструментальные" ❌
-# - "Анализировать данные для" ❌
-# - "Проводить проверки" ❌ (проверки чего?)
-
-# Верни СТРОГО JSON-массив из 7–8 объектов, без пояснений:
-# [
-#   {{"value":"crm-leads-process","label":"Task in {lang_code}"}},
-#   {{"value":"sales-reports","label":"Task in {lang_code}"}}
-# ]
-# """.strip()
 def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
     return f"""
 Сгенерируй РАБОЧИЕ ЗАДАЧИ (tasks) для должности "{role_title}".
@@ -302,35 +241,6 @@ def _build_exp_tasks_prompt(role_title: str, lang_code: str) -> str:
 """.strip()
 
 
-# ==== experience_achievements ====
-# def _build_exp_achievements_from_tasks_prompt(role_title: str, tasks_text: str, lang_code: str) -> str:
-#     return f"""
-# У тебя есть специалист с должностью "{role_title}" и вот список его реальных задач (из резюме):
-
-# {tasks_text}
-
-# На основе ИМЕННО ЭТИХ задач сгенерируй РЕЛЕВАНТНЫЕ для резюме примеры достижений.
-# Язык: "{lang_code}".
-
-# ФОРМАТ:
-# - Верни СТРОГО JSON-массив ИЗ 3 СТРОК без пояснений и без бэктиков.
-# - Каждая строка — одно достижение по формуле:
-#   действие + метрика + период + за счёт + эффект + бизнес-результат.
-
-# ТРЕБОВАНИЯ К СТИЛЮ:
-# - 60–120 символов на строку (не делай короче 50).
-# - Обязательно:
-#   • конкретная метрика (%, деньги, количество, скорость, время);
-#   • период (за 3 месяца, за год, за квартал и т.п.);
-#   • за счёт чего (какие именно скрипты, какая автоматизация, какие модели);
-#   • эффект для бизнеса (рост выручки, сокращение ошибок, экономия времени, улучшение качества и т.п.).
-# - Без эмодзи, без кавычек, без Markdown.
-# - Фразы должны быть правдоподобны для этих задач и роли "{role_title}" и выглядеть как реальные достижения для HR.
-
-# ВАЖНО:
-# - Возврати ТОЛЬКО JSON-массив строк без текста до/после.
-# - Никаких буллетов, нумерации, пояснений или комментариев.
-# """.strip()
 def _build_exp_achievements_from_tasks_prompt(role_title: str, tasks_text: str, lang_code: str) -> str:
     """Этот промпт генерирует ТЕКСТ достижений, НЕ кнопки."""
     return f"""
@@ -365,52 +275,6 @@ def _build_exp_achievements_from_tasks_prompt(role_title: str, tasks_text: str, 
 ]
 """.strip()
 
-# ==== skills_hard & skills_tools ====
-# def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
-#     return f"""
-# Сгенерируй СПИСОК ИНСТРУМЕНТОВ/ПРОГРАММ (tools) для резюме под позицию "{position}".
-# Язык меток (label): "{lang_code}".
-
-# ОБЩИЕ ТРЕБОВАНИЯ:
-# - Верни СТРОГО JSON-массив 7–8 объектов без пояснений и без бэктиков.
-# - Каждый объект: {{"value":"<slug-latin-kebab>", "label":"<инструмент/пакет на {lang_code}>"}}.
-# - "value": латиница, kebab-case, уникальные.
-# - НЕ добавляй никакого текста до/после JSON-массива.
-
-# СТРУКТУРА label:
-# - В КАЖДОМ "label" СНАЧАЛА идут 1–2 конкретных продукта/сервиса/системы через " / ".
-#   Примеры формата (НЕ печатать их дословно, это только образцы):
-#   • "1С:Медицина / MedOffice"
-# - Если это класс систем, НЕ пиши только класс вроде "Системы управления медицинской практикой".
-#   ОБЯЗАТЕЛЬНО дай конкретные продукты слева.
-# - Названия продуктов должны быть полностью читабельны в начале строки.
-
-# - ВАЖНО: Названия продуктов (до тире) остаются на английском.
-
-# ТРЕБОВАНИЯ К СПИСКУ:
-# - Из 7–8 пунктов МИНИМУМ 4 ДОЛЖНЫ содержать разные конкретные продукты/сервисы
-#   (их названия полностью видны слева до тире).
-# - Остальные 3–4 пункта могут описывать классы систем, но всё равно начинаются с конкретных продуктов.
-# - Разрешён максимум ОДИН базовый общий пункт типа "MS Office / Google Workspace".
-#   Остальные пункты ДОЛЖНЫ содержать специализированные инструменты для роли "{position}".
-
-# ТРЕБОВАНИЯ К "label":
-# - ≤ 30 символов, 2–4 слов, без эмодзи и кавычек.
-# - Формат строго: "<продукт1> [ / продукт2]".
-# - Избегай пустых общих фраз ("Системы анализа данных", "Информационные системы")
-#   без конкретных продуктов слева.
-
-# ПРОВЕРКИ КАЧЕСТВА (выполни мысленно, НЕ выводи):
-# - Убедись, что в начале каждого label стоят реальные названия ПО/сервисов.
-# - Не повторяй один и тот же продукт в разных пунктах без необходимости.
-
-
-# ПРИМЕР СТРУКТУРЫ (НЕ печатать его, это только образец формата):
-# [
-#   {{"value":"medesk-medoffice-practice","label":"Medesk / MedOffice"}},
-#   {{"value":"epic-cerner-emr","label":"Epic / Cerner"}}
-# ]
-# """.strip()
 def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
     return f"""
 Сгенерируй ИНСТРУМЕНТЫ И ПРОГРАММЫ (tools) для позиции "{position}".
@@ -443,6 +307,71 @@ def _build_skills_tools_prompt(position: str, lang_code: str) -> str:
   {{"value":"jira-trello","label":"Jira, Trello"}}
 ]
 """.strip()
+
+
+
+
+_MAX_VALUE_LEN_FOR_CB = 28
+def _short_value_for_cb(raw_value: str, role: str) -> str:
+    """
+    Возвращает короткий, уникальный и безопасный value для кнопок:
+    r<6-симв.хэш>-<slug> длиной не более 28.
+    """
+    base = _slugify(raw_value)
+    pref = "r" + hashlib.sha1((role or "").encode("utf-8")).hexdigest()[:6]
+    # сколько осталось под сам слаг с учётом "rxxxxxx-"
+    room = max(1, _MAX_VALUE_LEN_FOR_CB - (len(pref) + 1))
+    base = base[:room]
+    return f"{pref}-{base}"
+
+def _extract_json_array(text: str) -> list:
+    """Снимаем ```json, ищем первый валидный [ ... ]."""
+    s = (text or "").strip()
+    s = re.sub(r"^```(?:json)?\s*", "", s)
+    s = re.sub(r"\s*```$", "", s)
+    # 1) прямой JSON
+    try:
+        v = json.loads(s)
+        if isinstance(v, list):
+            return v
+    except Exception:
+        pass
+    # 2) первый блок в квадратных скобках
+    m = re.search(r"$begin:math:display$[\\s\\S]*?$end:math:display$", s)
+    if m:
+        return json.loads(m.group(0))
+    raise ValueError("JSON array not found")
+
+def _coerce_bullets_to_array(text: str) -> list[str]:
+    lines = [ln.rstrip() for ln in (text or "").splitlines()]
+    picked: list[str] = []
+    for ln in lines:
+        m = re.match(r"^(?:[-–—*•]|\d+[.)])\s+(.*)$", ln)
+        if not m:
+            continue
+        body = m.group(1).strip()
+
+        if body in {"[", "]"}:
+            continue
+        if body.startswith("[") and body.endswith("]") and len(body) <= 3:
+            continue
+        body = body.strip().strip('",').strip()
+
+        if body:
+            picked.append(body[:200])
+        if len(picked) == 3:
+            break
+
+    if not picked:
+        for ln in lines:
+            ln = ln.strip().strip('",').strip()
+            if ln in {"[", "]"} or not ln:
+                continue
+            picked.append(ln[:200])
+            if len(picked) == 3:
+                break
+    return picked[:3]
+
 
 
 # =========================
@@ -586,20 +515,39 @@ async def generate_values_options(user_id: int) -> list[str] | None:
     return labels
 
 
+@alert_on_exception(ttl=1)
+async def generate_skills_tools_options(user_id: int) -> list[str] | None:
+    """ИИ-подсказки для skills_tools на основе target_position."""
+    labels = None
+    try:
+        ctx = get_user_context(user_id)
+        position_raw = ctx.get("position") or ctx.get("target_position")
+        if not position_raw:
+            return None
+        lang_code = _map_lang_code(ctx.get("lang"))
+        pos_norm  = normalize_position(position_raw) or position_raw.strip()
 
+        prompt = _build_skills_tools_prompt(pos_norm, lang_code)
+        raw    = await ask_llm(prompt, read_timeout=120.0, retries=1)
+        items  = _parse_items(raw, max_len=70)
 
-_MAX_VALUE_LEN_FOR_CB = 28
-def _short_value_for_cb(raw_value: str, role: str) -> str:
-    """
-    Возвращает короткий, уникальный и безопасный value для кнопок:
-    r<6-симв.хэш>-<slug> длиной не более 28.
-    """
-    base = _slugify(raw_value)
-    pref = "r" + hashlib.sha1((role or "").encode("utf-8")).hexdigest()[:6]
-    # сколько осталось под сам слаг с учётом "rxxxxxx-"
-    room = max(1, _MAX_VALUE_LEN_FOR_CB - (len(pref) + 1))
-    base = base[:room]
-    return f"{pref}-{base}"
+        for it in items:
+            it["value"] = _short_value_for_cb(it.get("value", ""), pos_norm)
+
+        inserted = replace_user_ai_options(
+            user_id=user_id,
+            question_key="skills_tools",
+            lang=lang_code,
+            position=pos_norm,
+            items=items,
+        )
+        log.info("user_id=%s: skills_tools inserted=%s lang=%s pos=%s",
+                 user_id, inserted, lang_code, pos_norm)
+
+        labels = [it["label"] for it in items if it.get("label")]
+    except Exception as e:
+        log.exception("user_id=%s: generate_skills_tools_options failed: %s", user_id, e)
+    return labels
 
 
 @alert_on_exception(ttl=1)
@@ -629,81 +577,13 @@ async def generate_experience_tasks_options(user_id: int, role_title: str, *, no
                  user_id, inserted, role, lang_code)
 
         labels = [it.get("label","") for it in items if it.get("label")]
-
-        # === ДОБАВЛЕНО: алерт как в саммари ===
-        if notify and labels:
-            try:
-                username, full_name, _ = get_user_identity(user_id)
-                txt = "\n".join([
-                    f"Username: @{username or '-'}",
-                    f"Full name: {full_name or '-'}",
-                    "",
-                    f"Experience role: {role} - {lang_code}",
-                    "",
-                    "Exp tasks:",
-                    "- " + "\n- ".join(labels)
-                ])
-                await alert.send(txt, level="INFO")
-            except Exception as e:
-                log.warning("alert exp_tasks failed: %s", e)
-        # =====================================
-
         return labels
+    
     except Exception as e:
         log.exception("user_id=%s: generate_experience_tasks_options failed: %s", user_id, e)
         return None
 
 
-# handlers/ai_tasks.py — ДОБАВИТЬ рядом с утилитами
-def _extract_json_array(text: str) -> list:
-    """Снимаем ```json, ищем первый валидный [ ... ]."""
-    import re, json
-    s = (text or "").strip()
-    s = re.sub(r"^```(?:json)?\s*", "", s)
-    s = re.sub(r"\s*```$", "", s)
-    # 1) прямой JSON
-    try:
-        v = json.loads(s)
-        if isinstance(v, list):
-            return v
-    except Exception:
-        pass
-    # 2) первый блок в квадратных скобках
-    m = re.search(r"$begin:math:display$[\\s\\S]*?$end:math:display$", s)
-    if m:
-        return json.loads(m.group(0))
-    raise ValueError("JSON array not found")
-
-def _coerce_bullets_to_array(text: str) -> list[str]:
-    import re
-    lines = [ln.rstrip() for ln in (text or "").splitlines()]
-    picked: list[str] = []
-    for ln in lines:
-        m = re.match(r"^(?:[-–—*•]|\d+[.)])\s+(.*)$", ln)
-        if not m:
-            continue
-        body = m.group(1).strip()
-
-        if body in {"[", "]"}:
-            continue
-        if body.startswith("[") and body.endswith("]") and len(body) <= 3:
-            continue
-        body = body.strip().strip('",').strip()
-
-        if body:
-            picked.append(body[:200])
-        if len(picked) == 3:
-            break
-
-    if not picked:
-        for ln in lines:
-            ln = ln.strip().strip('",').strip()
-            if ln in {"[", "]"} or not ln:
-                continue
-            picked.append(ln[:200])
-            if len(picked) == 3:
-                break
-    return picked[:3]
 
 @alert_on_exception(ttl=1)
 async def generate_experience_achievements_examples(
@@ -746,64 +626,11 @@ async def generate_experience_achievements_examples(
                  user_id, inserted, role, lang_code)
 
         labels = [it.get("label","") for it in items if it.get("label")]
-        if notify and labels:
-            try:
-                username, full_name, _ = get_user_identity(user_id)
-                txt = "\n".join([
-                    f"Username: @{username or '-'}",
-                    f"Full name: {full_name or '-'}",
-                    "",
-                    f"Experience role: {role} - {lang_code}",
-                    "",
-                    "Tasks:",
-                    tasks_text or "-",
-                    "",
-                    "Achievements (examples):",
-                    "- " + "\n- ".join(labels)
-                ])
-                await alert.send(txt, level="INFO")
-            except Exception as e:
-                log.warning("alert exp_achievements failed: %s", e)
-
         return labels
+    
     except Exception as e:
         log.exception("user_id=%s: generate_experience_achievements_examples failed: %s", user_id, e)
         return None
-
-
-@alert_on_exception(ttl=1)
-async def generate_skills_tools_options(user_id: int) -> list[str] | None:
-    """ИИ-подсказки для skills_tools на основе target_position."""
-    labels = None
-    try:
-        ctx = get_user_context(user_id)
-        position_raw = ctx.get("position") or ctx.get("target_position")
-        if not position_raw:
-            return None
-        lang_code = _map_lang_code(ctx.get("lang"))
-        pos_norm  = normalize_position(position_raw) or position_raw.strip()
-
-        prompt = _build_skills_tools_prompt(pos_norm, lang_code)
-        raw    = await ask_llm(prompt, read_timeout=120.0, retries=1)
-        items  = _parse_items(raw, max_len=70)
-
-        for it in items:
-            it["value"] = _short_value_for_cb(it.get("value", ""), pos_norm)
-
-        inserted = replace_user_ai_options(
-            user_id=user_id,
-            question_key="skills_tools",
-            lang=lang_code,
-            position=pos_norm,
-            items=items,
-        )
-        log.info("user_id=%s: skills_tools inserted=%s lang=%s pos=%s",
-                 user_id, inserted, lang_code, pos_norm)
-
-        labels = [it["label"] for it in items if it.get("label")]
-    except Exception as e:
-        log.exception("user_id=%s: generate_skills_tools_options failed: %s", user_id, e)
-    return labels
 
 
 # =========================
@@ -867,29 +694,3 @@ async def chain_generate_after_position(user_id: int):
     except Exception as e:
         log.exception("chain_generate_after_position: %s", e)
 
-
-@alert_on_exception(ttl=1)
-async def generate_experience_bundle(user_id: int, role_title: str):
-    role = (role_title or "").strip()
-    if not role:
-        return
-    
-    tasks_labels = await generate_experience_tasks_options(user_id, role, notify=False)
-    if not tasks_labels:
-        return
-
-    username, full_name, _ = get_user_identity(user_id)
-    ctx = get_user_context(user_id)
-    lang_code = _map_lang_code(ctx.get("lang"))
-
-    parts = [
-        f"Username: @{username or '-'}",
-        f"Full name: {full_name or '-'}",
-        "",
-        f"Experience role: {role} - {lang_code}",
-        "",
-        "Experience tasks:",
-        "- " + "\n- ".join(tasks_labels),
-    ]
-
-    await alert.send("\n".join(parts), level="INFO")
