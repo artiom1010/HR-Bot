@@ -247,13 +247,25 @@ LANG_MAP = {
 def get_user_lang(s: Session, user_id: int) -> str:
     """Возвращает код языка пользователя (ru/en/ro). По умолчанию ru."""
     answer = s.query(Answer).filter_by(
-        user_id=user_id, 
+        user_id=user_id,
         question_key="main_language"
     ).first()
-    
+
     if not answer:
         return "ru"
     return LANG_MAP.get(answer.answer, "ru")
+
+
+def get_resume_lang(s: Session, user_id: int) -> str:
+    """Возвращает язык резюме пользователя (ru/en/ro). По умолчанию ru."""
+    answer = s.query(Answer).filter_by(
+        user_id=user_id,
+        question_key="resume_language"
+    ).first()
+    if not answer or not answer.answer:
+        return "ru"
+    code = answer.answer.split()[0].lower()
+    return code if code in ("ru", "en", "ro") else "ru"
 
 
 
