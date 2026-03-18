@@ -8,9 +8,9 @@ from datetime import datetime
 from sqlalchemy import text
 
 from _database import engine, Order, PaynetStatus
-from _key import get_download_keyboard
+from _key import get_download_keyboard, get_cover_letter_keyboard
 from handlers.bot_app import bot
-from handlers.db_helpers import get_user_lang
+from handlers.db_helpers import get_user_lang, get_resume_lang
 from i18n import t
 from stats_api import router as stats_router
 
@@ -44,12 +44,18 @@ async def paynet_notify(req: Request):
 
                 chat_id = order.user.telegram_id
                 lang = get_user_lang(session, order.user_id)
+                resume_lang = get_resume_lang(session, order.user_id)
                 print("===> chat_id:", chat_id)
-                text = t("💰 Оплата получена!\nНажми кнопку ниже, чтобы скачать резюме.", lang)
-                kb = get_download_keyboard(order.id, lang)
 
-                asyncio.create_task(bot.send_message(chat_id, text, reply_markup=kb))
-                print("===> MESSAGE SENT TASK CREATED")
+                payment_text = t("💰 Оплата получена!\nНажми кнопку ниже, чтобы скачать резюме.", lang)
+                kb = get_download_keyboard(order.id, lang)
+                asyncio.create_task(bot.send_message(chat_id, payment_text, reply_markup=kb))
+
+                bonus_text = t("🎁 Поздравляем с покупкой!\n\nВ подарок — шаблон письма для отклика на вакансию.\nСкачай его по кнопке ниже:", lang)
+                cover_kb = get_cover_letter_keyboard(order.id, lang)
+                asyncio.create_task(bot.send_message(chat_id, bonus_text, reply_markup=cover_kb))
+
+                print("===> MESSAGES SENT TASKS CREATED")
             else:
                 print("===> ORDER NOT FOUND for external_id:", external_id)
 

@@ -54,6 +54,17 @@ def get_download_keyboard(order_id: int, lang: str = "ru") -> InlineKeyboardMark
         ]
     )
 
+
+def get_cover_letter_keyboard(order_id: int, lang: str = "ru") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text=t("📥 Скачать шаблон письма для отклика", lang),
+                callback_data=f"download_cover:{order_id}"
+            )]
+        ]
+    )
+
 # ============= 
 # DEV PAYMENT KEYBOARD
 # ==============

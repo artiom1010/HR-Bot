@@ -6,7 +6,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 from _database import engine
-from handlers.db_helpers import create_order, get_user_lang
+from handlers.db_helpers import create_order, get_user_lang, get_resume_lang
 from pay_test import new_invoice, register_payment
 from _genai import process_order
 from _key import get_payment_keyboard
@@ -136,5 +136,33 @@ async def download_docx_callback(callback: CallbackQuery):
 
     if not sent:
         await callback.message.answer(t("Файлы не найдены на диске.", lang))
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("download_cover:"))
+async def download_cover_letter_callback(callback: CallbackQuery):
+    order_id = int(callback.data.split(":")[1])
+
+    def _get_langs():
+        with Session(engine) as s:
+            from _database import Order
+            order = s.get(Order, order_id)
+            if not order:
+                return "ru", "ru"
+            return get_user_lang(s, order.user_id), get_resume_lang(s, order.user_id)
+
+    lang, resume_lang = await asyncio.to_thread(_get_langs)
+
+    templates_dir = Path(__file__).parent.parent / "templates"
+    cover_letter_path = templates_dir / f"{resume_lang}_cover_letter.docx"
+
+    if cover_letter_path.is_file():
+        await callback.message.answer_document(
+            document=FSInputFile(str(cover_letter_path)),
+            caption=t("Шаблон письма для отклика", lang)
+        )
+    else:
+        await callback.message.answer(t("Файл не найден на диске.", lang))
 
     await callback.answer()
