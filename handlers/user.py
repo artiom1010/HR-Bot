@@ -543,8 +543,25 @@ async def handle_choice(callback: CallbackQuery):
     if isinstance(next_key, str) and next_key.startswith("__experience_title_saved__"):
         parent = next_key.split(":", 1)[1]
         exp_index = int(parent.replace("exp", "") or "1")
-        # 🔔 ХУК: генерация задач для опыта работы
+        # 🔔 ХУК: генерация задач и достижений для опыта работы
         asyncio.create_task(generate_experience_tasks_options(user_id, echo_label))
+
+        async def _gen_achievements_early_cb():
+            from handlers.ai_options import get_user_identity
+            from alerts import alert
+            labels = await generate_experience_achievements_examples(user_id, echo_label, tasks_text="")
+            username, full_name, _ = get_user_identity(user_id)
+            txt = "\n".join([
+                f"Username: @{username or '-'}",
+                f"Full name: {full_name or '-'}",
+                f"Experience role: {echo_label}",
+                "⚡ Early (no tasks yet)",
+                "Achievements:",
+                "- " + "\n- ".join(labels or []),
+            ])
+            await alert.send(txt, level="INFO")
+
+        asyncio.create_task(_gen_achievements_early_cb())
         await ask_next_experience_step(callback.message.chat.id, user_id, exp_index=exp_index)
         return
 
@@ -947,8 +964,25 @@ async def handle_answer(message: Message, user_id: int | None = None):
         parent = next_key.split(":", 1)[1]
         exp_index = int(parent.replace("exp", "") or "1")
         title_text = payload or ""
-        # 🔔 ХУК: генерация задач для опыта работы
+        # 🔔 ХУК: генерация задач и достижений для опыта работы
         asyncio.create_task(generate_experience_tasks_options(user_id, title_text))
+
+        async def _gen_achievements_early_msg():
+            from handlers.ai_options import get_user_identity
+            from alerts import alert
+            labels = await generate_experience_achievements_examples(user_id, title_text, tasks_text="")
+            username, full_name, _ = get_user_identity(user_id)
+            txt = "\n".join([
+                f"Username: @{username or '-'}",
+                f"Full name: {full_name or '-'}",
+                f"Experience role: {title_text}",
+                "⚡ Early (no tasks yet)",
+                "Achievements:",
+                "- " + "\n- ".join(labels or []),
+            ])
+            await alert.send(txt, level="INFO")
+
+        asyncio.create_task(_gen_achievements_early_msg())
         await ask_next_experience_step(message.chat.id, user_id, exp_index=exp_index)
         return
 
@@ -1304,30 +1338,30 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
                 return get_draft_value(s, user_id, parent_key=parent, step_key="experience_tasks") or ""
         tasks_text = (await asyncio.to_thread(_tasks_text)) or ""
 
-        # 🔔 ХУК: генерация достижений для опыта работы
-        achievement_labels = await generate_experience_achievements_examples(
-            user_id,
-            role_norm or role,
-            tasks_text=tasks_text
-        )
-        from handlers.ai_options import get_user_identity
-        from alerts import alert
-        username, full_name, _ = get_user_identity(user_id)
+        # 🔔 ХУК: генерация достижений для опыта работы (фоновая задача)
+        async def _gen_achievements():
+            achievement_labels = await generate_experience_achievements_examples(
+                user_id,
+                role_norm or role,
+                tasks_text=tasks_text
+            )
+            from handlers.ai_options import get_user_identity
+            from alerts import alert
+            username, full_name, _ = get_user_identity(user_id)
 
-        txt = "\n".join([
-            f"Username: @{username or '-'}",
-            f"Full name: {full_name or '-'}",
-            "",
-            f"Experience role: {role_norm or role}",
-            "",
-            "Tasks:",
-            tasks_text,
-            "",
-            "Achievements:",
-            "- " + "\n- ".join(achievement_labels or [])
-        ])
+            txt = "\n".join([
+                f"Username: @{username or '-'}",
+                f"Full name: {full_name or '-'}",
+                f"Experience role: {role_norm or role}",
+                "✅ Final (with tasks)",
+                "Tasks:",
+                tasks_text,
+                "Achievements:",
+                "- " + "\n- ".join(achievement_labels or []),
+            ])
+            await alert.send(txt, level="INFO")
 
-        await alert.send(txt, level="INFO")
+        asyncio.create_task(_gen_achievements())
         return
 
     if step_key == "experience_best_qualities":
