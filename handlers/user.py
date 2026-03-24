@@ -208,18 +208,22 @@ async def cmd_policy(message: Message):
             return get_user_lang(s, user.id) if user else "ro"
     lang = await asyncio.to_thread(_get_lang)
     
+    # base = f"https://turbocv.md/{lang}"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🔒 Privacy Policy",
             url="https://turbocv.md/privacy"
+            # url=f"{base}/privacy"
         )],
         [InlineKeyboardButton(
             text="📋 Terms of Use",
             url="https://turbocv.md/terms-of-use"
+            # url=f"{base}/terms-of-use"
         )],
         [InlineKeyboardButton(
             text="🍪 Data Processing Consent",
             url="https://turbocv.md/data-processing"
+            # url=f"{base}/data-processing"
         )]
     ])
     
