@@ -639,25 +639,12 @@ async def generate_experience_achievements_examples(
 @alert_on_exception(ttl=1)
 async def chain_generate_after_position(user_id: int):
     try:
-        task_labels = await generate_tasks_options(user_id)
-        if not task_labels:
-            log.warning("user_id=%s: Tasks попытка 1 провалилась, retry...", user_id)
-            await asyncio.sleep(2.0)
-            task_labels = await generate_tasks_options(user_id)
-        await asyncio.sleep(2.0)
-        
-        value_labels = await generate_values_options(user_id)
-        if not value_labels:
-            log.warning("user_id=%s: Values попытка 1 провалилась, retry...", user_id)
-            await asyncio.sleep(2.0)
-            value_labels = await generate_values_options(user_id)
-        await asyncio.sleep(2.0)
-        
-        tools_labels = await generate_skills_tools_options(user_id)
-        if not tools_labels:
-            log.warning("user_id=%s: Tools попытка 1 провалилась, retry...", user_id)
-            await asyncio.sleep(2.0)
-            tools_labels = await generate_skills_tools_options(user_id)
+        task_labels, value_labels, tools_labels = await asyncio.gather(
+            generate_tasks_options(user_id),
+            generate_values_options(user_id),
+            generate_skills_tools_options(user_id),
+            return_exceptions=False,
+        )
 
         username, full_name, _ = get_user_identity(user_id)
         ctx = get_user_context(user_id)
