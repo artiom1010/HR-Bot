@@ -46,6 +46,11 @@ def _row_to_context(row: ProcessedData) -> Dict[str, Any]:
             exp["job_responsibilities"] = [jr]
         elif jr is None:
             exp["job_responsibilities"] = []
+
+    for field in ("education_details", "languages"):
+        if context.get(field):
+            context[field] = context[field].replace("\\n", "\n")
+
     return context
 
 
