@@ -86,7 +86,7 @@ MULTI_SELECT_KEYS = {"summary_tasks", "summary_values", "experience_tasks", "ski
 PAUSE_BEFORE = {"summary", "skills"}
 
 WORD_LIMIT = 100
-JOB_DESC_WORD_LIMIT = 10000
+JOB_DESC_WORD_LIMIT = 500
 TRGT_POSITION_MAX = 50
 EXP_POSITION_MAX  = 50
 
@@ -208,22 +208,21 @@ async def cmd_policy(message: Message):
             return get_user_lang(s, user.id) if user else "ro"
     lang = await asyncio.to_thread(_get_lang)
     
-    # base = f"https://turbocv.md/{lang}"
+    # en → ro (английская версия не существует, используем румынскую)
+    url_lang = "ro" if lang in ("en", "ro") else "ru"
+    base = "https://turbocv.md"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="🔒 Privacy Policy",
-            url="https://turbocv.md/privacy"
-            # url=f"{base}/privacy"
+            url=f"{base}/privacy?lang={url_lang}"
         )],
         [InlineKeyboardButton(
             text="📋 Terms of Use",
-            url="https://turbocv.md/terms-of-use"
-            # url=f"{base}/terms-of-use"
+            url=f"{base}/terms-of-use?lang={url_lang}"
         )],
         [InlineKeyboardButton(
             text="🍪 Data Processing Consent",
-            url="https://turbocv.md/data-processing"
-            # url=f"{base}/data-processing"
+            url=f"{base}/data-processing?lang={url_lang}"
         )]
     ])
     
@@ -751,6 +750,12 @@ async def handle_answer(message: Message, user_id: int | None = None):
             free_qkey     = pop_free_wait(s, user.id)
             awaiting_step = pop_personal_wait(s, user.id)
             s.commit()
+
+            # Ворота "intro:" ждут нажатия кнопки — текст не принимаем
+            if free_qkey and free_qkey.startswith("intro:"):
+                set_free_wait(s, user.id, free_qkey)  # возвращаем ворота обратно
+                s.commit()
+                return user.id, free_qkey, "need_button", None
 
             if not free_qkey and not awaiting_step:
                 current_key = get_first_unanswered(s, user.id, QUESTION_FLOW)
