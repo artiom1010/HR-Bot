@@ -981,7 +981,7 @@ async def handle_answer(message: Message, user_id: int | None = None):
                 f"Username: @{username or '-'}",
                 f"Full name: {full_name or '-'}",
                 f"Experience role: {title_text}",
-                "⚡ Early (no tasks yet)",
+                "\n⚡ Early (no tasks yet)",
                 "Achievements:",
                 "- " + "\n- ".join(labels or []),
             ])
