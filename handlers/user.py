@@ -554,7 +554,7 @@ async def handle_choice(callback: CallbackQuery):
                 f"Username: @{username or '-'}",
                 f"Full name: {full_name or '-'}",
                 f"Experience role: {echo_label}",
-                "⚡ Early (no tasks yet)",
+                "\n⚡ Early (no tasks yet)",
                 "Achievements:",
                 "- " + "\n- ".join(labels or []),
             ])
@@ -1358,7 +1358,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
                 f"Username: @{username or '-'}",
                 f"Full name: {full_name or '-'}",
                 f"Experience role: {role_norm or role}",
-                "✅ Final (with tasks)",
+                "\n✅ Final (with tasks)",
                 "Tasks:",
                 tasks_text,
                 "Achievements:",
