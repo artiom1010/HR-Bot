@@ -1314,7 +1314,7 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
         loading_msg = None
         if not ready:
             loading_msg = await bot.send_message(chat_id, t("⏳ Подбираю варианты под твою должность...", lang))
-            for _ in range(12):  # 12 × 0.5s = 6s
+            for _ in range(60):  # 60 × 0.5s = 30s
                 await asyncio.sleep(0.5)
                 ready = await asyncio.to_thread(has_ai_options, "experience_tasks", user_id, role_norm)
                 if ready:
