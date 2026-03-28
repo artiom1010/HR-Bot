@@ -42,7 +42,7 @@ async def create_order_and_run_ai(message: Message, user_db_id: int) -> None:
     # 1. создаём заказ
     def _create():
         with Session(engine) as s:
-            order = create_order(s, user_db_id, invoice, amount_bani=100)
+            order = create_order(s, user_db_id, invoice, amount_bani=24000)
             return order.id
     order_id = await asyncio.to_thread(_create)
 
