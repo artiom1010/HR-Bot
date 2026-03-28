@@ -20,7 +20,7 @@ from handlers.db_helpers import (
 
 from handlers.order import create_order_and_run_ai
 from handlers.bot_app import bot
-from handlers.options_repo import get_options, get_label_for, normalize_position, get_user_context
+from handlers.options_repo import get_options, get_label_for, normalize_position, get_user_context, has_ai_options
 from handlers.ai_options import (
     chain_generate_after_position,
     generate_experience_tasks_options,
@@ -1308,8 +1308,26 @@ async def ask_next_experience_step(chat_id: int, user_id: int, exp_index: int = 
         role_norm = normalize_position(role)
 
         logger.info("EXP TASKS: parent=%s, role=%r, user_id=%s", parent, role_norm, user_id)
+
+        # Если AI ещё не успел — отправляем индикатор и ждём до 6 секунд
+        ready = await asyncio.to_thread(has_ai_options, "experience_tasks", user_id, role_norm)
+        loading_msg = None
+        if not ready:
+            loading_msg = await bot.send_message(chat_id, t("⏳ Подбираю варианты под твою должность...", lang))
+            for _ in range(12):  # 12 × 0.5s = 6s
+                await asyncio.sleep(0.5)
+                ready = await asyncio.to_thread(has_ai_options, "experience_tasks", user_id, role_norm)
+                if ready:
+                    break
+
+        if loading_msg:
+            try:
+                await loading_msg.delete()
+            except Exception:
+                pass
+
         pairs = await asyncio.to_thread(get_options, "experience_tasks", user_id, None, role_norm)
-        pairs = t_choices(pairs, lang)  # 👈
+        pairs = t_choices(pairs, lang)
 
         def _sel():
             with Session(engine) as s:

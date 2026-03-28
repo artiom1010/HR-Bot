@@ -53,6 +53,19 @@ def get_user_context(user_id: int) -> dict:
 # ОСНОВНОЕ API
 # ───────────────────────────
 from i18n import t
+
+def has_ai_options(question_key: str, user_id: int, position: Optional[str]) -> bool:
+    """Проверяет, есть ли уже AI-варианты для данного пользователя и должности."""
+    pos_norm = normalize_position(position)
+    with Session(engine) as s:
+        q = s.query(AnswerOption).filter(
+            AnswerOption.question_key == question_key,
+            AnswerOption.user_id == user_id,
+            AnswerOption.source == "ai",
+        )
+        if pos_norm:
+            q = q.filter(AnswerOption.position == pos_norm)
+        return q.first() is not None
 def get_options(question_key: str, user_id: int | None, lang: str | None, position: str | None):
     """
     Возвращает пары (value, label) в приоритете:
