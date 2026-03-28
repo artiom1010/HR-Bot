@@ -1,8 +1,8 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from _database import (
     User, Answer, Order, PaynetStatus,
-    ProcessedData, Draft, AnswerOption, StepLog
+    ProcessedData, Draft, AnswerOption, StepLog, MultiSelect
     )
 
 
@@ -148,6 +148,12 @@ def drafts_completed_count(s, user_id: int, parent_key: str) -> int:
 def clear_parent_drafts(s, user_id: int, parent_key: str):
     s.query(Draft).filter(Draft.user_id == user_id, Draft.parent_key == parent_key)\
       .delete(synchronize_session=False)
+    s.execute(
+        delete(MultiSelect).where(
+            MultiSelect.user_id == user_id,
+            MultiSelect.question_key.like(f"{parent_key}::%"),
+        )
+    )
     
 
 def replace_draft(s, user_id: int, parent_key: str, step_key: str, value: str):
