@@ -123,17 +123,27 @@ def build_resume(order_id: int, make_pdf: bool = True, make_docx: bool = True) -
         )
         result["pdf"] = str(pdf_path)
 
-    # 6) Делаем DOCX через Pandoc
-    if make_docx:
-        if shutil.which("pandoc") is None:
-            raise RuntimeError("Pandoc не найден в PATH. Установи pandoc и повтори.")
+    # # 6) Делаем DOCX через Pandoc
+    # if make_docx:
+    #     if shutil.which("pandoc") is None:
+    #         raise RuntimeError("Pandoc не найден в PATH. Установи pandoc и повтори.")
 
-        subprocess.run(
-            [
-                "pandoc", str(html_path), "-t", "docx", "-o", str(docx_path),
-                "--metadata=title:", "--reference-doc", str((TEMPLATES_DIR / "reference.docx").resolve())
-            ], check=True
-        )
+    #     subprocess.run(
+    #         [
+    #             "pandoc", str(html_path), "-t", "docx", "-o", str(docx_path),
+    #             "--metadata=title:", "--reference-doc", str((TEMPLATES_DIR / "reference.docx").resolve())
+    #         ], check=True
+    #     )
+    #     result["docx"] = str(docx_path)
+    # return result
+
+    # 6) Делаем DOCX через docxtpl
+    if make_docx:
+        from docxtpl import DocxTemplate
+        tmpl_path = Path("files/resume_tmpl.docx")
+        tpl = DocxTemplate(str(tmpl_path.resolve()))
+        tpl.render(context)
+        tpl.save(str(docx_path))
         result["docx"] = str(docx_path)
     return result
 
