@@ -8,11 +8,11 @@ from _database import engine, User, Order, PaynetStatus, StepLog
 router = APIRouter()
 
 STEP_LABELS = {
-    "main_language": "🌐 Язык общения",
-    "privacy_agreement": "📋 Согласие с политиками",
-    "resume_language": "📄 Язык резюме",
-    "target_position": "🧭 Желаемая должность",
-    "job_description": "🔍 Описание вакансии",
+    "main_language": "Язык общения",
+    "privacy_agreement": "Согласие с политиками",
+    "resume_language": "Язык резюме",
+    "target_position": "Желаемая должность",
+    "job_description": "Описание вакансии",
     "summary_industry": "Сфера работы",
     "summary_experience": "Лет опыта",
     "summary_tasks": "Лучшие задачи",
@@ -35,6 +35,8 @@ STEP_LABELS = {
     "contact_email": "Email",
     "contact_links": "Ссылки",
 }
+
+SKIP_STEP_KEYS = {"lang_custom"}
 
 @router.get("/stats")
 def get_statistics(
@@ -105,7 +107,7 @@ def get_statistics(
         # Добавляем оплату в конец воронки
         funnel.append({
             "step_key": "payment_done",
-            "label": "💳 Оплата",
+            "label": "Оплата",
             "users": paid_users,
         })
     
