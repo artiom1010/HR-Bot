@@ -101,6 +101,13 @@ def get_statistics(
         # Сортируем по порядку
         step_order = list(STEP_LABELS.keys())
         funnel.sort(key=lambda x: step_order.index(x["step_key"]) if x["step_key"] in step_order else 999)
+
+        # Добавляем оплату в конец воронки
+        funnel.append({
+            "step_key": "payment_done",
+            "label": "💳 Оплата",
+            "users": paid_users,
+        })
     
     return {
         "period": {"from": date_from, "to": date_to},

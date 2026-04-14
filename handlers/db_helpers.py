@@ -294,12 +294,13 @@ def log_step(s: Session, user_id: int, step_key: str, value: str = None):
     
     # Пропускаем маркеры завершения этапов
     SKIP_KEYS = {
-        "summary", 
-        "experience", 
-        "education", 
-        "courses", 
-        "skills", 
+        "summary",
+        "experience",
+        "education",
+        "courses",
+        "skills",
         "languages",
+        "lang_custom",
     }
     
     if step_key in SKIP_KEYS:
