@@ -6,6 +6,7 @@
 - normalize_position / get_user_context: утилиты для контекста
 """
 import re
+import logging
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from sqlalchemy import or_
 from _database import engine, Answer, AnswerOption
 from _utils import CHOICES as STATIC_CHOICES
 from _utils import CHOICES
+
+log = logging.getLogger(__name__)
 
 # ───────────────────────────
 # УТИЛИТЫ
@@ -142,16 +145,25 @@ def replace_user_ai_options(
             AnswerOption.source == "ai",
         ).delete(synchronize_session=False)
 
-        # вставить новые
+        # вставить новые (с дедупом по value — страховка от коллизий)
         inserted = 0
+        seen_values: set[str] = set()
         for it in items:
             val = it.get("value")
             lab = it.get("label")
             if not val or not lab:
                 continue
+            val_str = str(val)
+            if val_str in seen_values:
+                log.warning(
+                    "replace_user_ai_options: duplicate value skipped user_id=%s qkey=%s value=%r label=%r",
+                    user_id, question_key, val_str, lab,
+                )
+                continue
+            seen_values.add(val_str)
             row = AnswerOption(
                 question_key=question_key,
-                value=str(val),
+                value=val_str,
                 label=str(lab),
                 user_id=user_id,
                 lang=lang,

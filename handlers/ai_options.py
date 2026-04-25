@@ -317,9 +317,12 @@ def _short_value_for_cb(raw_value: str, role: str) -> str:
     """
     Возвращает короткий, уникальный и безопасный value для кнопок:
     r<6-симв.хэш>-<slug> длиной не более 28.
+    Хеш считается от (role + raw_value), чтобы разные пункты с похожим slug
+    не давали одинаковый префикс после обрезки.
     """
     base = _slugify(raw_value)
-    pref = "r" + hashlib.sha1((role or "").encode("utf-8")).hexdigest()[:6]
+    combined = f"{role or ''}|{raw_value or ''}"
+    pref = "r" + hashlib.sha1(combined.encode("utf-8")).hexdigest()[:6]
     # сколько осталось под сам слаг с учётом "rxxxxxx-"
     room = max(1, _MAX_VALUE_LEN_FOR_CB - (len(pref) + 1))
     base = base[:room]
