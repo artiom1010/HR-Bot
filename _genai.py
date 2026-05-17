@@ -201,13 +201,14 @@ async def call_do_genai(prompt: str) -> dict | None:
         "Content-Type": "application/json",
         "Authorization": f"Bearer {DO_API_TOKEN}",
     }
+    # DO Agents API больше не принимает system/developer-сообщения.
+    # Системная инструкция перенесена в Agent Instructions в DO Control Panel.
     payload = {
         "messages": [
-            {"role": "system", "content": "You strictly preserve all numbers, percentages and causal phrases; do not drop details. Output valid JSON only."},
             {"role": "user", "content": prompt}
-        ], 
-        "stream": False
-        }
+        ],
+        "stream": False,
+    }
 
     # таймауты раздельно: подлиннее на чтение
     timeout = httpx.Timeout(connect=10.0, read=120.0, write=20.0, pool=10.0)
