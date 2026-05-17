@@ -13,6 +13,7 @@ from handlers.bot_app import bot
 from handlers.db_helpers import get_user_lang, get_resume_lang
 from i18n import t
 from stats_api import router as stats_router
+from alerts import alert
 
 from _conf import (LINKSUCCESS, LINKERROR)
 
@@ -62,8 +63,20 @@ async def paynet_notify(req: Request):
         return {"ok": True}
 
     except Exception as e:
+        tb = traceback.format_exc()
         print("===> ERROR in paynet_notify:", e)
-        print(traceback.format_exc())
+        print(tb)
+        try:
+            await alert.send(
+                f"🔴 PAYNET WEBHOOK FAILED\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Юзер мог заплатить — проверь вручную!\n\n"
+                f"Error: {e}\n\n"
+                f"Traceback (tail):\n{tb[-800:]}",
+                level="ERROR",
+            )
+        except Exception as alert_err:
+            print("===> alert.send failed:", alert_err)
         return {"ok": False, "error": str(e)}
 
 

@@ -49,13 +49,28 @@ async def create_order_and_run_ai(message: Message, user_db_id: int) -> None:
     # 2. запускаем генерацию
     success = await process_order(order_id)
     if not success:
+        await alert.send(
+            f"🔴 RESUME GENERATION FAILED\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"order_id={order_id} user_db_id={user_db_id}\n"
+            f"Юзеру показано сообщение про поддержку.",
+            level="ERROR",
+        )
         await message.answer(t("💡 Не удалось сгенерировать резюме.\nПожалуйста, обратитесь в поддержку, отправив команду /support", lang))
         return
-    
-    try: 
+
+    try:
         pay_url = register_payment(order_id)
     except Exception as e:
         logger.exception("register_payment failed: %s", e)
+        await alert.send(
+            f"🔴 PAYNET REGISTER FAILED\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"order_id={order_id} user_db_id={user_db_id}\n"
+            f"Не смогли создать счёт на оплату.\n\n"
+            f"Error: {e}",
+            level="ERROR",
+        )
         await message.answer(t("⚠️ Ошибка при создании счёта, попробуй позже.", lang))
         return
 

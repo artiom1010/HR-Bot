@@ -255,7 +255,18 @@ async def call_do_genai(prompt: str) -> dict | None:
 
         except httpx.HTTPStatusError as e:
             # важное: логируем код и тело
-            logger.error("DO HTTP %s: %s", e.response.status_code, e.response.text[:500])
+            status = e.response.status_code
+            body = e.response.text[:500]
+            logger.error("DO HTTP %s: %s", status, body)
+            await alert.send(
+                f"🔴 DO API HTTP {status}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Главная генерация резюме упала.\n"
+                f"Prompt length: {len(prompt)} chars\n"
+                f"Попытка: {attempt+1}/3\n\n"
+                f"Body:\n{body}",
+                level="ERROR",
+            )
             return None
 
         except (httpx.TimeoutException, httpx.RequestError) as e:
